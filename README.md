@@ -19,7 +19,7 @@ conda create -n vecstor --file environments/vecstor-linux-64.explicit.txt
 
 依赖声明见 `environment.yml`。环境包含 Python、DuckDB、SQLGlot、Faiss CPU/GPU、gRPC/Protobuf 和 pytest。默认检查需要可用的 NVIDIA GPU 和本地 TCP 监听权限；沙箱受限时在沙箱外执行。仅验证 CPU 时可显式使用 `--cpu-only`。
 
-环境检查已通过，P1 本地精确混合查询基线已实现。当前业务路径使用 DuckDB 条件过滤和 NumPy 精确距离计算；存算分离服务及 Faiss ANN/GPU 业务调度在后续阶段实现。详细版本见 [环境说明](docs/environment.md)，项目计划见 [AGENTS.md](AGENTS.md)。
+环境检查已通过，P1 本地基线与 P2 gRPC 存算分离精确查询已实现。当前业务路径使用 DuckDB 条件过滤和 NumPy 精确距离计算；Faiss ANN/GPU 业务调度在后续阶段实现。详细版本见 [环境说明](docs/environment.md)，项目计划见 [AGENTS.md](AGENTS.md)。
 
 ## 本地混合查询
 
@@ -51,4 +51,27 @@ python scripts/vecstor.py demo --output-dir results/p1-correlated --distribution
 
 每组默认生成 10000 条、128 维数据，运行 12 条查询，并与独立 NumPy 真值比对。产物为 `dataset.npz`、`queries.json`、`ground_truth.json`、`actual.json` 和 `report.json`。输出文件和目录必须不存在，以防误覆盖；重复运行请更换路径。`data/` 和 `results/` 为 Git 忽略的本地产物。
 
-这些是正确性验收，不是性能基准；普通业务测试不需要 GPU 或网络监听权限。最新证据见 [P1 验证记录](docs/validation/p1-local-baseline.md)。
+这些是正确性验收，不是性能基准；P1 本地测试不需要 GPU 或网络监听，完整测试套件包含需 localhost 监听的 P2 测试。P1 证据见 [P1 验证记录](docs/validation/p1-local-baseline.md)。
+
+## P2 存算分离
+
+分别启动两个进程，存储服务持有数据，计算服务只配置存储地址：
+
+```bash
+# 终端一：复用前面生成的三维示例
+python scripts/serve.py storage --dataset data/example.npz --listen 127.0.0.1:50051
+# 终端二
+python scripts/serve.py compute --storage 127.0.0.1:50051 --listen 127.0.0.1:50052
+# 终端三
+python scripts/vecstor.py remote-query --compute 127.0.0.1:50052 \
+  --sql "SELECT id FROM items WHERE value < 100 ORDER BY vector_distance(vector, :query_vector) LIMIT 5" \
+  --vector '[0,0,0]'
+```
+
+通过 Linux Landlock 验证计算进程无法读取存储目录，并与 P1 结果对照：
+
+```bash
+python scripts/check_p2.py --output-dir results/p2-check --distribution independent
+```
+
+验收会自动创建独立服务、施加文件隔离、验证 16 条查询、停止存储后确认查询失败，并回收进程。输出目录必须不存在；沙箱限制网络监听时应在沙箱外运行。详细配置、错误行为与限制见 [P2 服务说明](docs/p2-services.md)。

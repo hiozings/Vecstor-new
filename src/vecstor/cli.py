@@ -26,7 +26,7 @@ def _write_json(path, content):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="VecStor P1 local exact reference; not a distributed engine")
+    parser = argparse.ArgumentParser(description="VecStor local reference and gRPC query client")
     commands = parser.add_subparsers(dest="command", required=True)
     generate = commands.add_parser("generate", help="Create a reproducible NPZ dataset")
     _generation_arguments(generate)
@@ -35,12 +35,20 @@ def main(argv=None):
     query.add_argument("--dataset", type=Path, required=True)
     query.add_argument("--sql", required=True)
     query.add_argument("--vector", required=True, help="JSON array, e.g. '[0, 0]'")
+    remote = commands.add_parser("remote-query", help="Query an independent gRPC compute service")
+    remote.add_argument("--compute", required=True, help="Compute host:port")
+    remote.add_argument("--sql", required=True)
+    remote.add_argument("--vector", required=True, help="JSON query vector")
+    remote.add_argument("--timeout", type=float, default=15)
     demo = commands.add_parser("demo", help="Verify 12 queries against independent NumPy truth")
     _generation_arguments(demo)
     demo.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        if args.command == "query":
+        if args.command == "remote-query":
+            from vecstor.rpc.client import query as remote_query
+            output = remote_query(args.compute, args.sql, json.loads(args.vector), args.timeout)
+        elif args.command == "query":
             vector = json.loads(args.vector)
             with LocalEngine(load_dataset(args.dataset)) as engine:
                 output = engine.execute(args.sql, vector).to_dict()

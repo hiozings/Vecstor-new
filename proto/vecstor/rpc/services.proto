@@ -1,0 +1,59 @@
+syntax = "proto3";
+package vecstor.v1;
+
+message Empty {}
+message Manifest {
+  string version = 1;
+  uint64 rows = 2;
+  uint32 dimension = 3;
+  string metric = 4;
+}
+message Row {
+  int64 id = 1;
+  string category = 2;
+  int64 timestamp = 3;
+  double value = 4;
+}
+message ScanRequest {
+  string version = 1;
+  string sql = 2;
+  uint32 batch_rows = 3;
+}
+message MetadataBatch {
+  string version = 1;
+  uint64 total_rows = 2;
+  uint64 offset = 3;
+  repeated Row rows = 4;
+}
+message FetchRequest {
+  string version = 1;
+  repeated int64 ids = 2;
+}
+message VectorBatch {
+  string version = 1;
+  uint32 dimension = 2;
+  repeated int64 ids = 3;
+  bytes vectors_f32_le = 4;
+}
+message QueryRequest {
+  string sql = 1;
+  repeated double vector = 2;
+}
+message QueryResponse {
+  repeated Row rows = 1;
+  repeated string projection = 2;
+  repeated double distances = 3;
+  uint64 matched_count = 4;
+  uint32 dimension = 5;
+  string version = 6;
+  uint64 rpc_calls = 7;
+  uint64 rpc_payload_bytes = 8;
+}
+service Storage {
+  rpc GetManifest(Empty) returns (Manifest);
+  rpc ScanMetadata(ScanRequest) returns (stream MetadataBatch);
+  rpc FetchVectors(FetchRequest) returns (VectorBatch);
+}
+service Compute {
+  rpc Query(QueryRequest) returns (QueryResponse);
+}

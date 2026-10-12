@@ -11,7 +11,7 @@
 - 依据：`README.md` 与 `项目申报书2.pdf`。
 - 申报实施周期：2026-01-01 至 2026-12-31。
 - 预期成果：一套可运行的混合查询存算分离向量数据引擎原型，以及包含架构设计、优化方案和性能测试的结题报告。
-- 已建立 Conda `vecstor` 环境并验证组件；已实现 P1 本地精确混合查询基线、数据生成与快照、SQL 白名单解析、CLI 和独立真值验收。P2 网络存储服务、ANN/GPU 业务路径尚未实现，不将本地基线称为存算分离引擎。
+- 已建立 Conda `vecstor` 环境；已实现 P1 本地精确基线及 P2 独立 gRPC 存储/计算服务。P2 通过 P1 对照和 Landlock 文件隔离验收；ANN/GPU 业务路径、在线版本更新和缓存优化尚未实现。
 - 以下排期按 2026-10-10 起剩余约 12 周制定。若存在其他位置的代码或学校提前验收，应先核实再更新排期。
 
 ## 2. 目标与范围
@@ -59,9 +59,9 @@
 | DuckDB / SQLGlot | SQL 执行、语法树解析 | DuckDB 1.5.6、SQLGlot 30.21.0；已实现受限混合 SQL 校验和参数化元数据过滤 |
 | Faiss CPU/GPU | 向量检索、索引保存与加载 | `faiss-gpu` 1.12.0 同时支持 CPU/GPU；Flat、IVFFlat 与持久化验证通过 |
 | CUDA / NumPy | GPU 运行库与精确计算 | CUDA 12.4 运行库、NumPy 1.26.4；P1 使用 CPU NumPy float64 穷举距离，GPU 业务路径待实现 |
-| gRPC / Protobuf | 元数据、向量和索引的网络访问 | grpcio/grpcio-tools 1.83.1、protobuf 7.35.1；协议生成和本地往返通过，业务协议待实现 |
+| gRPC / Protobuf | 版本清单、元数据扫描、向量批量读取和查询 | grpcio/grpcio-tools 1.83.1、protobuf 7.35.1；P2 业务 RPC 已实现，索引分发留待后续 |
 | Arrow Flight | 批量列式数据传输 | 可选，只有测出传输瓶颈后再评估 |
-| pytest | 正确性、接口与集成测试 | 9.1.1；已包含数据、解析、执行器与 CLI 测试，命令 `python -m pytest -q` |
+| pytest | 正确性、接口与集成测试 | 9.1.1；159 项 P1/P2 测试通过，包含真实 gRPC 和隔离进程；命令 `python -m pytest -q` |
 | 容器与部署脚本 | 隔离部署、复现实验 | 随原型补充，不先引入复杂集群平台 |
 
 安装状态与业务集成状态必须分开记录。通过 Conda 管理依赖，不混用 uv/pip 覆盖 Conda 管理的 Faiss、NumPy 和 CUDA 库。`environment.yml` 固定直接依赖，`environments/vecstor-linux-64.explicit.txt` 固定全部 Conda 包的构建和 MD5。保留 CPU 后端，GPU 计算使用本机已有设备。
@@ -91,17 +91,20 @@ LIMIT 10;
 
 ## 5. 实施计划
 
-P1 的环境准备、数据格式、查询子集、本地业务基线和独立真值验证已完成；学校结题要求等外部事项仍待团队核实。P2—P7 尚未完成。验收证据见 [P1 验证记录](docs/validation/p1-local-baseline.md)，不得将技术验收等同于全部项目验收。
+P1 与 P2 的技术交付已完成：P2 以只读启动快照提供数据导入、版本清单、分批读取和独立计算，文件隔离下查询与 P1 一致。学校结题要求等外部事项仍待团队核实；P3—P7 尚未完成。证据见 [P1 验证记录](docs/validation/p1-local-baseline.md) 和 [P2 验证记录](docs/validation/p2-grpc.md)，不得将技术验收等同于全部项目验收。
 
 | 阶段 | 时间 | 工作与交付 | 验收条件 |
 | --- | --- | --- | --- |
 | P1 | 10/10—10/16 | 盘点已有工作、核对结题要求；固定数据格式、查询子集和技术版本；跑通 SQL、检索及索引读写 | 技术方案、组件示例、精确答案生成脚本可复现 |
 | P2 | 10/17—10/30 | 存储/计算服务、数据导入、批量读取、精确混合查询 | 端到端查询正确；计算服务无法直接访问存储目录仍可运行 |
+| P2.5 | 新增，待评审与实施 | 交互式 SQL 终端、会话选库、托管数据导入、持久 CRUD 与读写一致性 | 终端完整工作流、持久化/并发快照、Landlock 下选库及读写验证；当前仅制定计划 |
 | P3 | 10/31—11/13 | 近似索引、两种执行路径、候选扩展、执行计划展示 | 同一查询可切换路径，输出正确性与召回率结果 |
 | P4 | 11/14—11/27 | 缓存、批量传输、策略选择、索引版本发布与批量更新 | 优化可独立开关；重启恢复、更新一致性测试通过 |
 | P5 | 11/28—12/11 | 性能对照、消融实验、两个计算节点版本切换 | 原始数据、图表、资源统计、局限性分析齐全 |
 | P6 | 12/12—12/25 | 修复问题、部署复现、报告与答辩演示 | 干净环境复现成功，材料形成可提交版本 |
 | P7 | 12/26—12/31 | 缓冲、导师反馈和提交 | 冻结代码与最终成果，完成结题 |
+
+P2.5 是用户新增需求，建议在 P3 前实施，并提前完成 P4 的部分写入一致性基础。设计草案见 [交互式 SQL 终端](docs/design/interactive-sql-shell.md)，任务拆分见 [实施计划](docs/superpowers/plans/2026-10-12-interactive-sql-shell.md)。新增 SQL 范围、持久 DuckDB、多数据库和终端依赖均未实现；当前技术状态及 P1/P2 约束不因计划文档而改变，后续排期按评审和实际进度调整。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -129,25 +132,39 @@ P1 的环境准备、数据格式、查询子集、本地业务基线和独立�
 │   └── vecstor-linux-64.explicit.txt # Linux x86_64 精确包锁定
 ├── scripts/
 │   ├── check_environment.py # SQL、Faiss CPU/GPU、gRPC 环境检查
-│   └── vecstor.py        # 本地 generate/query/demo 命令行入口
+│   ├── vecstor.py        # generate/query/demo/remote-query 命令行
+│   ├── serve.py          # 存储/计算服务进程入口
+│   ├── check_p2.py       # 独立进程、P1 对照及 Landlock 隔离验收
+│   └── generate_proto.py # 生成协议 Python 模块
+├── proto/vecstor/rpc/services.proto # gRPC 协议唯一源文件
 ├── src/vecstor/
 │   ├── __init__.py
 │   ├── data.py           # 数据与向量校验、只读数组副本
 │   ├── datasets.py       # 合成数据生成、NPZ 快照读写
 │   ├── evaluation.py     # 独立 NumPy 真值和 12 查询验收负载
 │   ├── cli.py            # 命令行参数和产物输出
+│   ├── isolation.py      # 计算进程 Landlock 权限与拒绝读取探针
+│   ├── storage/service.py # 只读快照、元数据过滤与向量批量服务
+│   ├── compute/          # RemoteEngine 与 Compute.Query 服务
+│   ├── rpc/              # 生成协议、客户端、生命周期和进程验收
 │   └── query/
 │       ├── __init__.py
 │       ├── parser.py     # SQL AST 白名单、参数化过滤计划
 │       └── engine.py     # 本地 DuckDB 过滤、块式精确 Top-K
 ├── tests/
 │   ├── unit/             # 数据、SQL 解析和精确执行测试
-│   └── integration/      # CLI 子进程和独立真值有效性测试
+│   └── integration/      # CLI、真实 gRPC、并发/超时与文件隔离测试
 ├── docs/
 │   ├── environment.md    # 环境使用、复现及验证记录
+│   ├── p2-services.md    # P2 启停、查询、隔离验收与限制
 │   ├── design/data-and-query-spec.md # P1 数据与查询契约
+│   ├── design/p2-grpc.md  # P2 协议、快照与隔离设计
+│   ├── design/interactive-sql-shell.md # P2.5 终端与可写数据库设计草案
 │   ├── validation/p1-local-baseline.md # P1 验收结果与局限
+│   ├── validation/p2-grpc.md # P2 对照、隔离与审查修复证据
 │   ├── superpowers/plans/2026-10-11-local-baseline.md # 执行计划与记录
+│   ├── superpowers/plans/2026-10-12-p2-grpc.md # P2 执行记录
+│   ├── superpowers/plans/2026-10-12-interactive-sql-shell.md # P2.5 待实施计划
 │   └── research/
 │       └── github-reference-survey.md # 相关仓库、复用入口与接入建议
 ├── data/                 # 已生成的本地示例，Git 忽略
@@ -161,7 +178,6 @@ P1 的环境准备、数据格式、查询子集、本地业务基线和独立�
 
 ```text
 src/vecstor/
-├── storage/              # 存储服务、批量读取、版本清单
 ├── index/                # 索引构建、搜索、持久化与更新
 ├── cache/                # 有界缓存与失效管理
 └── common/               # 数据类型、协议定义、配置与统计
@@ -171,7 +187,7 @@ configs/                  # 不含凭据的运行与实验配置
 
 不要为满足目录树而创建空模块。新增、移动、删除目录或改变职责时，在同一次改动中更新本节；已实现目录移入“当前项目文件”，未实现内容保留为规划。
 
-后续在现有 query 模块增加优化路径，在 integration 测试中增加跨服务验证；当前 CLI 验收不是网络集成测试。参考资料入口：[相关 GitHub 仓库与复用建议](docs/research/github-reference-survey.md)。该调研为技术评估，不表示已集成所有上游组件。
+后续在现有 query/compute 模块增加优化路径，在 storage 中增加版本发布和索引分发。参考资料入口：[相关 GitHub 仓库与复用建议](docs/research/github-reference-survey.md)。该调研为技术评估，不表示已集成所有上游组件。
 
 ## 7. 开发约束
 
@@ -182,9 +198,11 @@ configs/                  # 不含凭据的运行与实验配置
 - 配置与代码分离；不硬编码机器绝对路径、服务地址或凭据。
 - 不提交密钥、个人联系方式、未经许可的数据集或大型生成文件；不复制申报书中的个人联系信息到公开文档。
 - 保留原始申报书，修订说明记录在文档中，不覆盖源材料。
-- 环境检查：`conda run --no-capture-output -n vecstor python scripts/check_environment.py`；依赖检查：`conda run -n vecstor python -m pip check`；本地业务测试：`conda run -n vecstor python -m pytest -q`。业务服务尚未实现，不得将环境检查当作业务测试通过。
+- 环境检查：`conda run --no-capture-output -n vecstor python scripts/check_environment.py`；依赖检查：`conda run -n vecstor python -m pip check`；全套业务测试：`conda run -n vecstor python -m pytest -q`。P2 测试需要 localhost 监听，沙箱受限时在沙箱外运行，不得将环境检查当作业务测试通过。
 - 本地验收：`python scripts/vecstor.py demo --output-dir results/p1-demo`；输出目录必须不存在。生成快照不覆盖现有文件。所有命令从项目根目录、在 vecstor 环境内执行。
 - Dataset 拥有输入副本并设置只读标志；可信本地调用者不得主动解除数组写保护。不要把此约束当作恶意输入隔离或并发快照协议。
+- P2 服务使用 `scripts/serve.py storage/compute`，远程查询使用 `scripts/vecstor.py remote-query`；完整参数见 [P2 服务说明](docs/p2-services.md)。P2 验收使用 `python scripts/check_p2.py --output-dir results/p2-check`，输出目录不得存在。
+- 修改 `proto/vecstor/rpc/services.proto` 后运行 `python scripts/generate_proto.py` 并同步生成文件；不要手改生成的 pb2 模块。
 
 ### 一致性与故障行为
 
@@ -194,6 +212,10 @@ configs/                  # 不含凭据的运行与实验配置
 - 网络调用设置超时；读请求重试有界；写请求重试必须有幂等语义。
 - 服务不可达、索引损坏、版本不匹配应返回明确错误或执行有记录的恢复流程，不能静默返回不完整结果。
 - 将批量更新的可见性延迟写入文档，不将其描述为实时强一致更新。
+- P2 当前仅启动时读取单个 NPZ，SHA-256 为固定版本；运行中替换文件不会热更新，需重启加载。P4 才实现在线更新与版本退役。
+- P2 每条查询传播总 deadline，应用重试为 0；向量每批至多 1 MiB、1024 行，消息上限 4 MiB。版本/顺序/大小/流完整性不匹配必须失败，不返回部分成功结果。
+- 存储端 8 个工作线程、最多 4 条活跃扫描，超额扫描非阻塞返回 RESOURCE_EXHAUSTED，保留向量读取容量，禁止改成扫描流占满共享线程池的实现。
+- `rpc_payload_bytes` 仅为 Protobuf 请求/响应序列化字节数，不是实际网络流量。默认仅本机可信网络，无 TLS/鉴权，不宣称生产部署完备。
 
 ### 测试与性能实验
 
@@ -213,10 +235,17 @@ configs/                  # 不含凭据的运行与实验配置
 - 本地已有可用的显卡，可通过 `nvidia-smi` 查看，若检测不到则应该是沙箱权限等限制，此时允许在沙箱外检测和使用显卡。
 - 已验证本机 RTX 4060 Laptop GPU（8188 MiB）、驱动 580.178.04 可运行当前环境。GPU 和 localhost gRPC 检查可能需要沙箱外执行；`--cpu-only` 明确跳过 GPU，不能据此声称 GPU 验证成功。
 - 环境操作与复现说明见 [docs/environment.md](docs/environment.md)。已有 `vecstor` 环境时先检查再更新，不重复创建，不修改 `base` 或系统驱动。
+- P2 的 `--isolate-storage-dir` 在导入计算库、启动线程前应用 Landlock，失败必须停止，不降级；默认普通启动模式不改变文件权限。正式隔离证据必须同时包含目录/文件读取拒绝和远程查询成功。
 
 ### 参考项目与复用
 
 - 在实现某项功能前，可以先从参考项目里寻找可供学习参照或者二次复用的部分，避免重复造轮子。
+
+### git注意事项
+
+- 执行 git 操作前需要先征得用户的同意。
+- 开发新功能时，需要创建新的git分支，在分支上进行开发，确认功能正确后才能合并到 main 。
+
 
 ## 8. 文档维护与变更记录
 
