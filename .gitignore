@@ -4,6 +4,9 @@ __pycache__/
 .pytest_cache/
 .venv/
 .conda/
+*.egg-info/
+build/
+dist/
 
 # Local data and generated benchmark outputs
 /data/

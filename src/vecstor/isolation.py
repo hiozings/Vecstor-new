@@ -15,9 +15,10 @@ def restrict_compute_filesystem(storage_dir):
     if sys.platform != "linux" or platform.machine() not in {"x86_64", "aarch64"}:
         raise RuntimeError("Landlock acceptance requires Linux x86_64/aarch64")
     directory = Path(storage_dir).resolve(strict=True)
-    probes = sorted(directory.glob("*.npz"))
+    probes = sorted([*directory.glob("*.npz"), *directory.glob("imports/*.npz"),
+                     *directory.glob("databases/*.duckdb")])
     if not probes:
-        raise ValueError("Isolation probe requires an existing NPZ snapshot")
+        raise ValueError("Isolation probe requires an existing NPZ source or managed database")
     probe = probes[0].resolve(strict=True)
     if not probe.is_relative_to(directory):
         raise ValueError("Isolation probe may not escape the storage directory")

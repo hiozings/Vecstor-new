@@ -51,7 +51,13 @@ conda create -n vecstor --file environments/vecstor-linux-64.explicit.txt
 conda list -n vecstor --explicit --md5 > environments/vecstor-linux-64.explicit.txt
 ```
 
-不要用 uv 或 pip 在同一环境中覆盖 Conda 管理的 NumPy、Faiss 或 CUDA 库。
+不要用 uv 或 pip 在同一环境中覆盖 Conda 管理的 NumPy、Faiss 或 CUDA 库。仅本项目使用 `python -m pip install --no-deps --no-build-isolation -e .` 注册 console-script，项目本身不在 Conda 显式包清单中，复现后需单独注册入口。
+
+## P2.5 终端依赖更新
+
+2026-10-12 在先检查已有环境后，以 `--freeze-installed` 方式新增 prompt-toolkit 3.0.53 与 Rich 15.0.0；预解析确认没有替换原有包。原已安装的 setuptools 84.0.0、wheel 0.48.0 纳入直接依赖声明，以复现项目入口构建。
+
+`environment.yml` 与 Linux 精确包锁定文件已更新。依赖一致性检查通过；`vecstor --help` 可运行。项目版本为 `0.2.5.dev0`，入口链接当前源码，未发布到包仓库。
 
 ## 2026-10-10 验证记录
 

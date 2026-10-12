@@ -19,7 +19,28 @@ conda create -n vecstor --file environments/vecstor-linux-64.explicit.txt
 
 依赖声明见 `environment.yml`。环境包含 Python、DuckDB、SQLGlot、Faiss CPU/GPU、gRPC/Protobuf 和 pytest。默认检查需要可用的 NVIDIA GPU 和本地 TCP 监听权限；沙箱受限时在沙箱外执行。仅验证 CPU 时可显式使用 `--cpu-only`。
 
-环境检查已通过，P1 本地基线与 P2 gRPC 存算分离精确查询已实现。当前业务路径使用 DuckDB 条件过滤和 NumPy 精确距离计算；Faiss ANN/GPU 业务调度在后续阶段实现。详细版本见 [环境说明](docs/environment.md)，项目计划见 [AGENTS.md](AGENTS.md)。
+环境检查已通过，P1 本地基线、P2 gRPC 存算分离和 P2.5 交互式 SQL/持久 CRUD 已实现。当前业务路径使用 DuckDB SQL 与 NumPy 精确距离；Faiss ANN/GPU 业务调度在后续阶段实现。详细版本见 [环境说明](docs/environment.md)，项目计划见 [AGENTS.md](AGENTS.md)。
+
+## 交互式 SQL 终端
+
+本机已安装 `vecstor` 命令。新环境需从项目根目录注册入口（不重新解析依赖）：
+
+```bash
+conda activate vecstor
+python -m pip install --no-deps --no-build-isolation -e .
+```
+
+分别在三个终端运行：
+
+```bash
+vecstor serve storage --data-root data/catalog
+vecstor serve compute --storage 127.0.0.1:50051
+vecstor --compute 127.0.0.1:50052
+```
+
+进入后用 `.open demo --create` 建库/选库，直接输入 SQL。回车续行，分号后回车执行；支持表管理、INSERT/UPDATE/DELETE、普通 SELECT、聚合和内联向量查询。可用 `.help`、`.databases`、`.tables`、`.schema`、`.datasets`、`.import`。数据持久保存于存储服务，终端不打开数据库文件。
+
+完整示例、SQL 范围与隔离运行方法见 [终端使用说明](docs/sql-shell.md)。旧脚本和 P1/P2 入口保留兼容。
 
 ## 本地混合查询
 

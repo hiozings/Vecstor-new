@@ -1,0 +1,80 @@
+syntax = "proto3";
+package vecstor.v2;
+import "vecstor/rpc/services.proto";
+
+message ControlRequest {
+  string action = 1;
+  string database_id = 2;
+  string name = 3;
+  bool create = 4;
+  string source = 5;
+  string table = 6;
+  string operation_id = 7;
+}
+message ControlResponse { string json_result = 1; }
+message SQLRequest { string database_id = 1; string sql = 2; string operation_id = 3; }
+message Column { string name = 1; string type = 2; }
+message VectorValue { repeated double values = 1; }
+message Cell {
+  oneof value {
+    bool null_value = 1;
+    bool boolean = 2;
+    int64 integer = 3;
+    double number = 4;
+    string text = 5;
+    VectorValue vector = 6;
+  }
+}
+message SQLRow { repeated Cell cells = 1; }
+message ResultFrame {
+  enum Kind { SCHEMA = 0; ROWS = 1; COMPLETE = 2; }
+  Kind kind = 1;
+  repeated Column columns = 2;
+  repeated SQLRow rows = 3;
+  optional int64 affected_rows = 4;
+  string operation_id = 5;
+  uint64 revision = 6;
+  double elapsed_seconds = 7;
+  string selected_database_id = 8;
+  string selected_database_name = 9;
+  string execution_path = 10;
+}
+message BeginReadRequest { string database_id = 1; string table = 2; double ttl_seconds = 3; }
+message ReadLease {
+  string token = 1;
+  string database_id = 2;
+  string table_id = 3;
+  uint64 revision = 4;
+  string schema_version = 5;
+  uint32 dimension = 6;
+  string table = 7;
+}
+message LeaseRequest { string database_id = 1; string token = 2; }
+message ScanRequest { string database_id = 1; string token = 2; string sql = 3; uint32 batch_rows = 4; }
+message MetadataBatch {
+  string token = 1;
+  uint64 revision = 2;
+  uint64 total_rows = 3;
+  uint64 offset = 4;
+  repeated vecstor.v1.Row rows = 5;
+}
+message FetchRequest { string database_id = 1; string token = 2; repeated int64 ids = 3; }
+message VectorBatch {
+  string token = 1;
+  uint64 revision = 2;
+  uint32 dimension = 3;
+  repeated int64 ids = 4;
+  bytes vectors_f32_le = 5;
+}
+service SQLStorage {
+  rpc Control(ControlRequest) returns (ControlResponse);
+  rpc ExecuteSQL(SQLRequest) returns (stream ResultFrame);
+  rpc BeginRead(BeginReadRequest) returns (ReadLease);
+  rpc EndRead(LeaseRequest) returns (vecstor.v1.Empty);
+  rpc ScanMetadata(ScanRequest) returns (stream MetadataBatch);
+  rpc FetchVectors(FetchRequest) returns (VectorBatch);
+}
+service SQLCompute {
+  rpc Control(ControlRequest) returns (ControlResponse);
+  rpc ExecuteSQL(SQLRequest) returns (stream ResultFrame);
+}

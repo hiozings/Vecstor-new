@@ -11,7 +11,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="VecStor P2 gRPC services")
     commands = parser.add_subparsers(dest="role", required=True)
     storage = commands.add_parser("storage")
-    storage.add_argument("--dataset", required=True)
+    source=storage.add_mutually_exclusive_group(required=True)
+    source.add_argument("--dataset", help="P2 legacy read-only snapshot")
+    source.add_argument("--data-root", help="P2.5 managed persistent databases and imports")
     storage.add_argument("--listen", default="127.0.0.1:50051")
     compute = commands.add_parser("compute")
     compute.add_argument("--storage", required=True)
@@ -28,8 +30,12 @@ def main(argv=None):
             from vecstor.compute.service import create_compute_server
             server, port, backend = create_compute_server(args.storage, args.listen, args.timeout, args.batch_rows)
         else:
-            from vecstor.storage.service import create_storage_server
-            server, port, backend = create_storage_server(args.dataset, args.listen)
+            if args.data_root:
+                from vecstor.storage.sql_service import create_catalog_server
+                server, port, backend = create_catalog_server(args.data_root, args.listen)
+            else:
+                from vecstor.storage.service import create_storage_server
+                server, port, backend = create_storage_server(args.dataset, args.listen)
         def stop(*_):
             server.stop(1)
         signal.signal(signal.SIGTERM, stop)
