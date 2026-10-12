@@ -1,0 +1,1 @@
+"""VecStor local reference implementation."""

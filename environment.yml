@@ -1,0 +1,19 @@
+name: vecstor
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12.15
+  - faiss-gpu=1.12.0
+  - cuda-version=12.4
+  - numpy=1.26.4
+  - duckdb=1.5.6
+  - python-duckdb=1.5.6
+  - sqlglot=30.21.0
+  - grpcio=1.83.1
+  - grpcio-tools=1.83.1
+  - protobuf=7.35.1
+  - pytest=9.1.1
+  - pip=26.2.1

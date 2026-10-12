@@ -1,0 +1,15 @@
+# Python and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.conda/
+
+# Local data and generated benchmark outputs
+/data/
+/results/
+
+# Local credentials
+.env
+.env.*
+!.env.example
