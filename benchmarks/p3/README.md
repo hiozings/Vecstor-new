@@ -34,3 +34,12 @@ python benchmarks/p3/calibrate.py --output-dir results/recall-calibration
 产物含 dataset.npz、独立查询数组、每组冻结配置/校准网格汇总、逐查询 heldout.jsonl、候选 L 消融、构建统计、源码和脚本摘要及查询级 bootstrap 区间。`report.json` 的内存为离线校准进程峰值，不是计算服务预算。原始公开 embedding 在确认来源与许可后再加入；当前只生成可复现合成数据。
 
 中断后以相同参数加 `--resume` 恢复，已完成组不会重算，冻结配置不会重选；不同参数或重复证据会被拒绝。恢复后报告的 elapsed_seconds 是本次恢复调用耗时，并非完整实验总时间。
+
+## 冻结参数的真实 RPC 验证
+
+```bash
+python benchmarks/p3/validate_quality.py --calibration-dir results/recall-calibration \
+  --output-dir results/recall-rpc-validation
+```
+
+为每个数据场景启动独立服务、导入对应 NPZ、显式构建同配置索引。每组默认取 4 个留出查询、重复三次，逐项核对返回 ID 与离线冻结结果及 float64 距离；这是 RPC 一致性证据，不能用四条查询替代 500 条独立质量验收。生成实际 database/table/revision/build 指纹绑定的 `quality-profiles.json`；原 nprobe=8 对照单独保留，精确回退不冒称 ANN 质量。

@@ -1,0 +1,43 @@
+{
+  "format_version": 1,
+  "profiles": [
+    {
+      "format_version": 1,
+      "profile_id": "q100000-independent-0p01-filter-first",
+      "index_key": {
+        "database_id": "9e66d26f-feba-490f-b549-5cab59050c8f",
+        "table_id": "792c15e2-3b05-41bf-88ad-51ab6841c2e8",
+        "revision": 1,
+        "schema_version": "792c15e2-3b05-41bf-88ad-51ab6841c2e8",
+        "dimension": 128,
+        "metric": "squared_l2",
+        "build_fingerprint": "9ee59bb2335e5e416b801eed67ba2ae7e9d9a2a23e270d68a3728b2429465bb2"
+      },
+      "workload": {
+        "metadata_sql": "SELECT \"id\", \"category\", \"timestamp\", \"value\" FROM \"items\" WHERE \"value\" < 1000.0",
+        "k": 10,
+        "path": "filter-first",
+        "query_min": 0.0,
+        "query_max": 1.0
+      },
+      "budget": {
+        "nprobe_floor": 224,
+        "initial_candidates": 64,
+        "max_candidates": 4096,
+        "max_rounds": 6
+      },
+      "evidence": {
+        "calibration_queries": 200,
+        "evaluation_queries": 500,
+        "calibration_mean_recall": 0.972,
+        "evaluation_mean_recall": 0.9734,
+        "incomplete_queries": 0,
+        "exact_queries": 0,
+        "dataset_sha256": "ec5904b5e4d341893f4071b73d88f598780f1273215870814a0db75f816435f6",
+        "calibration_queries_sha256": "7acd8bfe47157618e73a2386c715e51020e13ce1bc4b3d5d8c4378bb0e94992b",
+        "evaluation_queries_sha256": "f1267fcafbef4b10c9b9c37b38c7c420ddfd0537447c164e2f4cd52aefc66eb0",
+        "scope": "empirical mean Recall@10; not an online or per-query guarantee"
+      }
+    }
+  ]
+}
