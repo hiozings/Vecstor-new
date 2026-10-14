@@ -1,24 +1,25 @@
 """v2 SQL routing and remote vector queries pinned to an MVCC lease."""
 
 import json
-import math
 import time
 
 import grpc
-import numpy as np
 
-from vecstor.data import query_vector
-from vecstor.query.statements import classify_statement
+from vecstor.query.statements import classify_statement, safe_name
+from vecstor.query.search_options import SearchOptions
+from vecstor.compute.index_manager import IndexManager
+from vecstor.compute.vector_execution import execute_vector
 from vecstor.rpc import sql_pb2 as pb, sql_pb2_grpc as rpc
-from vecstor.rpc.common import OPTIONS, RemoteError, VECTOR_PAYLOAD_BYTES, active
+from vecstor.rpc.common import OPTIONS, RemoteError, active
 from vecstor.rpc.sql_codec import encode_result
 
 
 class SQLComputeService(rpc.SQLComputeServicer):
-    def __init__(self, address, timeout=15):
+    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8):
         self.channel = grpc.insecure_channel(address, options=OPTIONS)
         self.stub = rpc.SQLStorageStub(self.channel)
         self.timeout = timeout
+        self.index_manager=IndexManager(self.stub,max_bytes=index_memory_mib*1024*1024,max_entries=index_max_entries)
 
     def close(self): self.channel.close()
 
@@ -55,7 +56,11 @@ class SQLComputeService(rpc.SQLComputeServicer):
                         output.update(selected_database_id=database["id"], selected_database_name=database["name"])
                 yield from encode_result(output)
             elif plan.vector is not None:
-                output = self._vector(request, plan.vector, context, deadline)
+                options=SearchOptions.from_proto(request.search_options)
+                normalized=pb.SQLRequest.FromString(request.SerializeToString())
+                normalized.sql=plan.sql
+                output=execute_vector(self.stub,self.index_manager.registry,normalized,plan.vector,options,
+                                      context,deadline,explain=plan.explain)
                 output["elapsed_seconds"] = time.monotonic() - started
                 for frame in encode_result(output):
                     self._remaining(context, deadline)
@@ -75,61 +80,31 @@ class SQLComputeService(rpc.SQLComputeServicer):
         finally:
             if stream is not None: stream.cancel()
 
-    def _vector(self, request, plan, context, deadline):
-        def remaining(): return self._remaining(context, deadline)
-        def check(condition, message):
-            if not condition: raise RemoteError(grpc.StatusCode.DATA_LOSS, message)
-        lease = self.stub.BeginRead(pb.BeginReadRequest(database_id=request.database_id, table=plan.table,
-                                                       ttl_seconds=min(60, remaining())), timeout=remaining())
-        stream = None
+    def GetSearchCapabilities(self,request,context):
+        return pb.ControlResponse(json_result=json.dumps({'ann':True,'algorithm':'cpu_ivfflat',
+            'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':False}))
+
+    def BuildIndex(self,request,context):
         try:
-            check(bool(lease.token) and lease.database_id == request.database_id and lease.table == plan.table
-                  and 0 < lease.dimension * 4 <= VECTOR_PAYLOAD_BYTES, "Invalid read lease")
-            vector = query_vector(plan.query_vector, lease.dimension).astype(np.float64)
-            size = min(256, VECTOR_PAYLOAD_BYTES // (lease.dimension * 4))
-            stream = self.stub.ScanMetadata(pb.ScanRequest(database_id=request.database_id, token=lease.token,
-                                             sql=request.sql, batch_rows=size), timeout=remaining())
-            context.add_callback(stream.cancel)
-            count, total, batches = 0, None, 0
-            seen = set()
-            best_rows, best_distances = [], np.empty(0, dtype=np.float64)
-            for batch in stream:
-                remaining(); batches += 1
-                check(batch.token == lease.token and batch.revision == lease.revision, "Metadata lease mismatch")
-                if total is None: total = batch.total_rows
-                check(batch.total_rows == total and batch.offset == count and count+len(batch.rows) <= total
-                      and len(batch.rows) <= size, "Metadata stream count mismatch")
-                if not batch.rows:
-                    check(total==0 and batches==1, "Unexpected empty metadata batch")
-                    continue
-                ids = [row.id for row in batch.rows]
-                check(len(set(ids))==len(ids) and not seen.intersection(ids), "Duplicate remote ID")
-                check(all(r.id >= 0 and r.category and math.isfinite(r.value) for r in batch.rows), "Invalid remote metadata")
-                seen.update(ids)
-                fetched = self.stub.FetchVectors(pb.FetchRequest(database_id=request.database_id, token=lease.token, ids=ids), timeout=remaining())
-                check(fetched.token==lease.token and fetched.revision==lease.revision and fetched.dimension==lease.dimension
-                      and list(fetched.ids)==ids and len(fetched.vectors_f32_le)==len(ids)*lease.dimension*4, "Invalid vector response")
-                vectors = np.frombuffer(fetched.vectors_f32_le,dtype="<f4").reshape(len(ids),lease.dimension)
-                check(np.isfinite(vectors).all(), "Nonfinite remote vector")
-                delta = vectors.astype(np.float64)-vector
-                distances = np.sum(delta*delta,axis=1,dtype=np.float64)
-                entries = [{"id":r.id,"category":r.category,"timestamp":r.timestamp,"value":r.value,
-                            "vector":v.tolist()} for r,v in zip(batch.rows,vectors)]
-                merged = best_rows+entries
-                all_distances = np.concatenate((best_distances,distances))
-                selection = np.lexsort((np.array([r["id"] for r in merged],dtype=np.int64),all_distances))[:plan.limit]
-                best_rows=[merged[i] for i in selection];best_distances=all_distances[selection]
-                count+=len(ids)
-            check(total is not None and total==count,"Incomplete metadata stream")
-            types={"id":"BIGINT","category":"VARCHAR","timestamp":"BIGINT","value":"DOUBLE",
-                   "vector":f"FLOAT[{lease.dimension}]","distance":"DOUBLE"}
-            return {"columns":[{"name":out,"type":types[source]} for out,source in plan.projection],
-                    "rows":[[float(distance) if source=="distance" else row[source] for _,source in plan.projection]
-                            for row,distance in zip(best_rows,best_distances)],
-                    "revision":lease.revision,"execution_path":"grpc_vector_exact","affected_rows":None}
-        finally:
-            if stream is not None: stream.cancel()
-            try:
-                self.stub.EndRead(pb.LeaseRequest(database_id=request.database_id,token=lease.token),timeout=1)
-            except grpc.RpcError:
-                pass  # Server TTL is the bounded fallback when the connection is lost.
+            safe_name(request.table)
+            output=self.index_manager.build(request,context)
+            return pb.ControlResponse(json_result=json.dumps(output,allow_nan=False))
+        except RemoteError as error: context.abort(error.code,error.details)
+        except grpc.RpcError as error: context.abort(error.code(),error.details())
+        except ValueError as error: context.abort(grpc.StatusCode.INVALID_ARGUMENT,str(error))
+
+    def ListIndexes(self,request,context):
+        if not request.database_id: context.abort(grpc.StatusCode.INVALID_ARGUMENT,'Select a database first')
+        try:
+            table=safe_name(request.table) if request.table else ''
+            output=self.index_manager.registry.list(request.database_id,table)
+            return pb.ControlResponse(json_result=json.dumps(output,allow_nan=False))
+        except ValueError as error: context.abort(grpc.StatusCode.INVALID_ARGUMENT,str(error))
+
+    def ClearIndexes(self,request,context):
+        if not request.database_id: context.abort(grpc.StatusCode.INVALID_ARGUMENT,'Select a database first')
+        try:
+            table=safe_name(request.table) if request.table else ''
+            output=self.index_manager.registry.clear(request.database_id,table)
+            return pb.ControlResponse(json_result=json.dumps(output))
+        except ValueError as error: context.abort(grpc.StatusCode.INVALID_ARGUMENT,str(error))

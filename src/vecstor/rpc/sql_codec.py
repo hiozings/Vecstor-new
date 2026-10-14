@@ -1,5 +1,6 @@
 """Typed SQL results with bounded Protobuf frames and lossless int64 cells."""
 import math
+import json
 
 from vecstor.rpc import sql_pb2 as pb
 from vecstor.rpc.common import MAX_MESSAGE_BYTES
@@ -64,6 +65,11 @@ def encode_result(result):
                                selected_database_id=result.get('selected_database_id', ''),
                                selected_database_name=result.get('selected_database_name', ''),
                                execution_path=result.get('execution_path', ''))
+    if 'execution_plan' in result:
+        plan = result['execution_plan']
+        if not isinstance(plan, dict):
+            raise ValueError('Execution plan must be a JSON object')
+        completion.execution_plan.json_payload = json.dumps(plan, allow_nan=False)
     affected = result.get('affected_rows')
     if affected is not None:
         if isinstance(affected, bool) or not isinstance(affected, int) or not 0 <= affected < 2**63:
@@ -94,7 +100,7 @@ def decode_frame(frame):
     _bounded(frame)
     if frame.kind != pb.ResultFrame.COMPLETE and (
             frame.HasField('affected_rows') or frame.operation_id or frame.revision or
-            frame.elapsed_seconds or frame.selected_database_id or frame.selected_database_name or frame.execution_path):
+            frame.elapsed_seconds or frame.selected_database_id or frame.selected_database_name or frame.execution_path or frame.HasField('execution_plan')):
         raise ValueError('Completion metadata appears in a non-completion frame')
     if frame.kind == pb.ResultFrame.SCHEMA:
         if frame.rows:
@@ -110,9 +116,16 @@ def decode_frame(frame):
         affected = frame.affected_rows if frame.HasField('affected_rows') else None
         if affected is not None and affected < 0:
             raise ValueError('Negative affected row count')
-        return {'kind':'complete', 'affected_rows':affected, 'revision':frame.revision,
+        event = {'kind':'complete', 'affected_rows':affected, 'revision':frame.revision,
                 'operation_id':frame.operation_id, 'elapsed_seconds':frame.elapsed_seconds,
                 'selected_database_id':frame.selected_database_id,
                 'selected_database_name':frame.selected_database_name,
                 'execution_path':frame.execution_path}
+        if frame.HasField('execution_plan'):
+            plan = json.loads(frame.execution_plan.json_payload)
+            if not isinstance(plan, dict):
+                raise ValueError('Execution plan must be a JSON object')
+            json.dumps(plan, allow_nan=False)
+            event['execution_plan'] = plan
+        return event
     raise ValueError('Unknown result frame kind')

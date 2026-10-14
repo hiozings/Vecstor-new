@@ -10,6 +10,8 @@ from threading import Event, Lock
 
 import duckdb
 import numpy as np
+import sqlglot
+from sqlglot import exp
 
 from vecstor.data import Dataset
 from vecstor.query.statements import classify_statement, safe_name
@@ -202,9 +204,19 @@ class Database:
         def change():
             source_digest, data = load()
             self.connection.execute(f'CREATE TABLE {identifier(table)} (id BIGINT PRIMARY KEY, category VARCHAR NOT NULL, "timestamp" BIGINT NOT NULL, value DOUBLE NOT NULL, vector FLOAT[{data.dimension}] NOT NULL)')
-            if data.size:
-                self.connection.executemany(f"INSERT INTO {identifier(table)} VALUES (?, ?, ?, ?, ?)",
-                    list(zip(data.ids.tolist(), data.categories.tolist(), data.timestamps.tolist(), data.values.tolist(), data.vectors.tolist())))
+            for offset in range(0, data.size, 1024):
+                self._check_time()
+                batch = slice(offset, offset + 1024)
+                # Bind vector text once per batch: binding millions of individual
+                # Python floats is expensive. The fixed-array cast remains SQL
+                # parameter binding, and JSON preserves finite float32 values.
+                vectors = json.dumps(data.vectors[batch].tolist(), allow_nan=False, separators=(',', ':'))
+                self.connection.execute(
+                    f"INSERT INTO {identifier(table)} SELECT unnest(?::BIGINT[]), unnest(?::VARCHAR[]), "
+                    f"unnest(?::BIGINT[]), unnest(?::DOUBLE[]), unnest(?::FLOAT[{data.dimension}][])",
+                    [data.ids[batch].tolist(), data.categories[batch].tolist(), data.timestamps[batch].tolist(),
+                     data.values[batch].tolist(), vectors])
+                self._check_time()
             self._validate_table(table, creating=True)
             return result(affected_rows=data.size, source_sha256=source_digest)
         return self._write(operation_id, digest, change)
@@ -222,7 +234,8 @@ class Database:
                 raise ValueError("Table is not a registered vector table")
             token = str(uuid.uuid4())
             public = {"token": token, "database_id": self.id, "table_id": row[0], "revision": revision,
-                      "schema_version": row[0], "dimension": row[1], "table": table}
+                      "schema_version": row[0], "dimension": row[1], "table": table,
+                      "row_count": connection.execute(f"SELECT COUNT(*) FROM {identifier(table)}").fetchone()[0]}
             self.leases[token] = (connection, time.monotonic() + ttl, public)
             return public
         except Exception:
@@ -256,6 +269,31 @@ class Database:
         if set(mapping) != set(ids):
             raise ValueError("Vector ID not present in snapshot")
         return np.asarray([mapping[i] for i in ids], dtype=np.float32)
+
+    def _snapshot_page(self, token, after_id, limit):
+        connection, _, lease = self._lease(token)
+        if not 1 <= limit <= 1024 or limit * lease["dimension"] * 4 > 1024 * 1024:
+            raise ValueError("Snapshot batch exceeds transfer limit")
+        return connection.execute(f"SELECT id, vector FROM {identifier(lease['table'])} WHERE id > ? ORDER BY id LIMIT ?",
+                                  [after_id, limit]).fetchall()
+
+    def _filter_candidates(self, token, sql, ids):
+        connection, _, lease = self._lease(token)
+        plan = classify_statement(sql)
+        if plan.vector is None or plan.table != lease["table"]:
+            raise ValueError("Candidate query does not match leased table")
+        if len(ids) > 1024 or len(set(ids)) != len(ids) or any(isinstance(i,bool) or not isinstance(i,int) or i < 0 for i in ids):
+            raise ValueError("Candidate IDs must be distinct nonnegative int64 values, at most 1024")
+        if not ids: return []
+        placeholders=','.join('?' for _ in ids)
+        present=connection.execute(f"SELECT id FROM {identifier(lease['table'])} WHERE id IN ({placeholders})",ids).fetchall()
+        if {r[0] for r in present} != set(ids):
+            raise ValueError("Candidate ID does not exist in leased snapshot")
+        statement=sqlglot.parse_one(plan.vector.metadata_sql,read="duckdb")
+        statement=statement.where(exp.In(this=exp.column("id",quoted=True),expressions=[exp.Placeholder() for _ in ids]))
+        rows=connection.execute(statement.sql(dialect="duckdb"),ids).fetchall()
+        mapping={r[0]:r for r in rows}
+        return [mapping[i] for i in ids if i in mapping]
 
     def _end_read(self, token):
         lease = self.leases.pop(token, None)

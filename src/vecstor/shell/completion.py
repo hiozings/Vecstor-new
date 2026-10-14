@@ -4,7 +4,7 @@ from prompt_toolkit.completion import WordCompleter
 
 class SchemaCompleter(WordCompleter):
     def __init__(self):
-        self.keywords = frozenset('SELECT FROM WHERE ORDER BY LIMIT INSERT INTO VALUES UPDATE SET DELETE CREATE TABLE DROP GROUP HAVING COUNT SUM AVG MIN MAX vector_distance .help .databases .open .datasets .import .tables .schema .status .mode .timer .clear .quit'.split())
+        self.keywords = frozenset('EXPLAIN ANALYZE SELECT FROM WHERE ORDER BY LIMIT INSERT INTO VALUES UPDATE SET DELETE CREATE TABLE DROP GROUP HAVING COUNT SUM AVG MIN MAX vector_distance .help .databases .open .datasets .import .tables .schema .status .mode .timer .search .index .plan .clear .quit'.split())
         self.names = set(self.keywords)
         super().__init__(sorted(self.names), ignore_case=True)
 

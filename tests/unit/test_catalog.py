@@ -157,3 +157,62 @@ def test_invalid_database_names(tmp_path, name):
     from vecstor.storage.catalog import DatabaseCatalog
     with DatabaseCatalog(tmp_path) as c:
         with pytest.raises(ValueError): c.open_database(name, True)
+
+
+def test_import_batches_preserve_large_ids_and_float32_values(tmp_path):
+    from vecstor.data import Dataset
+    from vecstor.storage.catalog import DatabaseCatalog
+    n = 2049
+    vectors = np.random.default_rng(17).standard_normal((n, 3)).astype(np.float32)
+    vectors[1023] = [np.finfo(np.float32).max, np.nextafter(np.float32(0), np.float32(1)), -0.0]
+    vectors[1024] = -vectors[1023]
+    ids = np.arange(n, dtype=np.int64) + (2**63 - n)
+    data = Dataset(ids, ["论文';?" for _ in range(n)], -ids, np.arange(n, dtype=np.float64), vectors)
+    with DatabaseCatalog(tmp_path) as catalog:
+        database = catalog.open_database('demo', True)['id']
+        db = catalog.database(database)
+        first = db.call('import', 'test-source', 'items', lambda: ('digest', data), 'batch-import')
+        rows = operate(catalog, database, 'SELECT * FROM items ORDER BY id')['rows']
+        assert first['affected_rows'] == n and first['revision'] == 1
+        assert [r[0] for r in rows] == ids.tolist()
+        assert [r[1] for r in rows] == data.categories.tolist()
+        assert [r[2] for r in rows] == data.timestamps.tolist()
+        assert [r[3] for r in rows] == data.values.tolist()
+        actual = np.asarray([r[4] for r in rows], dtype=np.float32)
+        np.testing.assert_array_equal(actual.view(np.uint32), vectors.view(np.uint32))
+        def unavailable_source():
+            raise AssertionError('successful retry must not reload the source')
+        assert db.call('import', 'test-source', 'items', unavailable_source, 'batch-import') == first
+
+
+def test_import_cancel_at_batch_boundary_rolls_back_and_records_failure(tmp_path, monkeypatch):
+    from vecstor.datasets import generate_dataset
+    from vecstor.storage.catalog import DatabaseCatalog
+    data = generate_dataset(2049, 2)
+    with DatabaseCatalog(tmp_path) as catalog:
+        database = catalog.open_database('demo', True)['id']
+        db = catalog.database(database)
+        check = db._check_time
+        counts = []
+        def cancel_after_first_batch():
+            check()
+            exists = db.connection.execute("SELECT count(*) FROM information_schema.tables WHERE table_name='items'").fetchone()[0]
+            if exists:
+                count = db.connection.execute('SELECT count(*) FROM items').fetchone()[0]
+                counts.append(count)
+                if count == 1024:
+                    raise TimeoutError('cancelled at batch boundary')
+        monkeypatch.setattr(db, '_check_time', cancel_after_first_batch)
+        with pytest.raises(TimeoutError, match='batch boundary'):
+            db.call('import', 'test-source', 'items', lambda: ('digest', data), 'cancel-import')
+        monkeypatch.setattr(db, '_check_time', check)
+        assert 1024 in counts
+        result = operate(catalog, database, 'SHOW TABLES')
+        assert result['rows'] == [] and result['revision'] == 0
+        assert catalog.status(database, 'cancel-import')['status'] == 'FAILED'
+        def unavailable_source():
+            raise AssertionError('failed retry must not reload the source')
+        with pytest.raises(ValueError, match='Previous operation failed'):
+            db.call('import', 'test-source', 'items', unavailable_source, 'cancel-import')
+        with pytest.raises(ValueError, match='different request'):
+            db.call('import', 'different-source', 'items', unavailable_source, 'cancel-import')

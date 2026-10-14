@@ -31,6 +31,7 @@ class Shell:
         self.console = console or Console()
         self.buffer = StatementBuffer()
         self.mode, self.timer, self.exiting = 'table', False, False
+        self.show_plan = False
         self.page_size = max(1, page_size)
         self.continue_page = continue_page or self._continue_page
         self.completer = SchemaCompleter()
@@ -83,7 +84,11 @@ class Shell:
             started, stream = perf_counter(), None
             try:
                 stream = self.client.execute_stream(statement)
-                render_stream(self.console, stream, self.mode, self.page_size, self.continue_page)
+                if getattr(self.client, 'last_search_mode', None) == 'approx':
+                    self.console.print('Search requested mode: approx (approximate results unless exact fallback completes).', markup=False)
+                completion = render_stream(self.console, stream, self.mode, self.page_size, self.continue_page, show_plan=self.show_plan)
+                if self.timer:
+                    self.console.print(f"Compute elapsed: {completion.get('elapsed_seconds', 0):.3f}s")
                 self.refresh_completion()
             except (ValueError, OSError, KeyboardInterrupt, DisplayCancelled) as exc:
                 self.buffer.pending = ''.join(statements[index + 1:]) + self.buffer.pending
@@ -98,7 +103,7 @@ class Shell:
                 if stream is not None:
                     stream.close()
                 if self.timer:
-                    self.console.print(f'Elapsed: {perf_counter() - started:.3f}s')
+                    self.console.print(f'Elapsed: {perf_counter() - started:.3f}s (terminal)')
 
 
 def run_shell(client):

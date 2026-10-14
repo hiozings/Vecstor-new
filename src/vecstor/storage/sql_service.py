@@ -6,6 +6,7 @@ from threading import BoundedSemaphore, Lock
 import time
 
 import grpc
+import numpy as np
 
 from vecstor.rpc import sql_pb2 as pb, sql_pb2_grpc as rpc, services_pb2 as v1
 from vecstor.rpc.common import (DEFAULT_BATCH_ROWS, MAX_BATCH_ROWS, MAX_MESSAGE_BYTES,
@@ -166,6 +167,50 @@ class SQLStorageService(rpc.SQLStorageServicer):
                     vectors_f32_le=vectors.astype('<f4', copy=False).tobytes(order='C')), context)
         except (ValueError, OSError, TimeoutError) as error:
             _abort(context, error)
+
+    def StreamVectorSnapshot(self, request, context):
+        _remaining(context)
+        if not self._stream_slots.acquire(blocking=False):
+            context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, 'At most four active streams are allowed')
+        try:
+            lease=self._lease(request.database_id,request.token)
+            requested=request.batch_rows or DEFAULT_BATCH_ROWS
+            if requested > MAX_BATCH_ROWS or lease['dimension']*4 > VECTOR_PAYLOAD_BYTES:
+                context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,'Snapshot batch exceeds transfer limit')
+            batch_rows=min(requested,VECTOR_PAYLOAD_BYTES//(lease['dimension']*4))
+            total=lease['row_count'];offset=0;after=-1
+            while True:
+                rows=self.catalog.snapshot_page(request.database_id,request.token,after,batch_rows,
+                        timeout=_remaining(context),cancelled=lambda:not context.is_active())
+                if offset+len(rows)>total or (not rows and offset!=total):
+                    context.abort(grpc.StatusCode.DATA_LOSS,'Snapshot count mismatch')
+                if rows or total==0:
+                    vectors=np.asarray([r[1] for r in rows],dtype='<f4').reshape(len(rows),lease['dimension'])
+                    yield _bounded(pb.SnapshotBatch(token=request.token,revision=lease['revision'],
+                        table_id=lease['table_id'],schema_version=lease['schema_version'],dimension=lease['dimension'],
+                        total_rows=total,offset=offset,ids=[r[0] for r in rows],vectors_f32_le=vectors.tobytes()),context)
+                offset+=len(rows)
+                if offset==total: break
+                after=rows[-1][0]
+        except (ValueError,OSError,TimeoutError) as error:
+            _abort(context,error)
+        finally:
+            self._stream_slots.release()
+
+    def FilterCandidates(self, request, context):
+        if not self._stream_slots.acquire(blocking=False):
+            context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,'At most four active filtering/stream requests are allowed')
+        try:
+            lease=self._lease(request.database_id,request.token)
+            rows=self.catalog.filter_candidates(request.database_id,request.token,request.sql,request.ids,
+                    timeout=_remaining(context),cancelled=lambda:not context.is_active())
+            return _bounded(pb.CandidateResult(token=request.token,revision=lease['revision'],
+                checked_count=len(request.ids),checked_ids=request.ids,
+                rows=[v1.Row(id=r[0],category=r[1],timestamp=r[2],value=r[3]) for r in rows]),context)
+        except (ValueError,OSError,TimeoutError) as error:
+            _abort(context,error)
+        finally:
+            self._stream_slots.release()
 
 
 def create_catalog_server(root, address):

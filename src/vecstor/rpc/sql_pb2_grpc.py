@@ -65,6 +65,16 @@ class SQLStorageStub:
                 request_serializer=vecstor_dot_rpc_dot_sql__pb2.FetchRequest.SerializeToString,
                 response_deserializer=vecstor_dot_rpc_dot_sql__pb2.VectorBatch.FromString,
                 _registered_method=True)
+        self.StreamVectorSnapshot = channel.unary_stream(
+                '/vecstor.v2.SQLStorage/StreamVectorSnapshot',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.SnapshotRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.SnapshotBatch.FromString,
+                _registered_method=True)
+        self.FilterCandidates = channel.unary_unary(
+                '/vecstor.v2.SQLStorage/FilterCandidates',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.CandidateRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.CandidateResult.FromString,
+                _registered_method=True)
 
 
 class SQLStorageServicer:
@@ -106,6 +116,18 @@ class SQLStorageServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StreamVectorSnapshot(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def FilterCandidates(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SQLStorageServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -138,6 +160,16 @@ def add_SQLStorageServicer_to_server(servicer, server):
                     servicer.FetchVectors,
                     request_deserializer=vecstor_dot_rpc_dot_sql__pb2.FetchRequest.FromString,
                     response_serializer=vecstor_dot_rpc_dot_sql__pb2.VectorBatch.SerializeToString,
+            ),
+            'StreamVectorSnapshot': grpc.unary_stream_rpc_method_handler(
+                    servicer.StreamVectorSnapshot,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.SnapshotRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.SnapshotBatch.SerializeToString,
+            ),
+            'FilterCandidates': grpc.unary_unary_rpc_method_handler(
+                    servicer.FilterCandidates,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.CandidateRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.CandidateResult.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -312,6 +344,60 @@ class SQLStorage:
             metadata,
             _registered_method=True)
 
+    @staticmethod
+    def StreamVectorSnapshot(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/vecstor.v2.SQLStorage/StreamVectorSnapshot',
+            vecstor_dot_rpc_dot_sql__pb2.SnapshotRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.SnapshotBatch.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def FilterCandidates(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLStorage/FilterCandidates',
+            vecstor_dot_rpc_dot_sql__pb2.CandidateRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.CandidateResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
 
 class SQLComputeStub:
     """Missing associated documentation comment in .proto file."""
@@ -332,6 +418,26 @@ class SQLComputeStub:
                 request_serializer=vecstor_dot_rpc_dot_sql__pb2.SQLRequest.SerializeToString,
                 response_deserializer=vecstor_dot_rpc_dot_sql__pb2.ResultFrame.FromString,
                 _registered_method=True)
+        self.GetSearchCapabilities = channel.unary_unary(
+                '/vecstor.v2.SQLCompute/GetSearchCapabilities',
+                request_serializer=vecstor_dot_rpc_dot_services__pb2.Empty.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
+                _registered_method=True)
+        self.BuildIndex = channel.unary_unary(
+                '/vecstor.v2.SQLCompute/BuildIndex',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.BuildIndexRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
+                _registered_method=True)
+        self.ListIndexes = channel.unary_unary(
+                '/vecstor.v2.SQLCompute/ListIndexes',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.IndexRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
+                _registered_method=True)
+        self.ClearIndexes = channel.unary_unary(
+                '/vecstor.v2.SQLCompute/ClearIndexes',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.IndexRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
+                _registered_method=True)
 
 
 class SQLComputeServicer:
@@ -349,6 +455,30 @@ class SQLComputeServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetSearchCapabilities(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def BuildIndex(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListIndexes(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ClearIndexes(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SQLComputeServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -361,6 +491,26 @@ def add_SQLComputeServicer_to_server(servicer, server):
                     servicer.ExecuteSQL,
                     request_deserializer=vecstor_dot_rpc_dot_sql__pb2.SQLRequest.FromString,
                     response_serializer=vecstor_dot_rpc_dot_sql__pb2.ResultFrame.SerializeToString,
+            ),
+            'GetSearchCapabilities': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSearchCapabilities,
+                    request_deserializer=vecstor_dot_rpc_dot_services__pb2.Empty.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.SerializeToString,
+            ),
+            'BuildIndex': grpc.unary_unary_rpc_method_handler(
+                    servicer.BuildIndex,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.BuildIndexRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.SerializeToString,
+            ),
+            'ListIndexes': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListIndexes,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.IndexRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.SerializeToString,
+            ),
+            'ClearIndexes': grpc.unary_unary_rpc_method_handler(
+                    servicer.ClearIndexes,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.IndexRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -417,6 +567,114 @@ class SQLCompute:
             '/vecstor.v2.SQLCompute/ExecuteSQL',
             vecstor_dot_rpc_dot_sql__pb2.SQLRequest.SerializeToString,
             vecstor_dot_rpc_dot_sql__pb2.ResultFrame.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSearchCapabilities(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLCompute/GetSearchCapabilities',
+            vecstor_dot_rpc_dot_services__pb2.Empty.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def BuildIndex(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLCompute/BuildIndex',
+            vecstor_dot_rpc_dot_sql__pb2.BuildIndexRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListIndexes(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLCompute/ListIndexes',
+            vecstor_dot_rpc_dot_sql__pb2.IndexRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ClearIndexes(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLCompute/ClearIndexes',
+            vecstor_dot_rpc_dot_sql__pb2.IndexRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
             options,
             channel_credentials,
             insecure,

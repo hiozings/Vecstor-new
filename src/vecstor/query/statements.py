@@ -3,7 +3,7 @@
 Only SQL emitted from the validated AST may be passed to DuckDB. Database
 commands are routing instructions, and vector plans are executed by compute.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
 
 import numpy as np
@@ -31,6 +31,7 @@ class StatementPlan:
     table: str | None = None
     database_name: str | None = None
     vector: VectorPlan | None = None
+    explain: str | None = None
 
     @property
     def is_write(self) -> bool:
@@ -247,6 +248,23 @@ def _vector(tree, table):
 def _classify(tree):
     if type(tree) is exp.Command:
         _only(tree, {'this', 'expression'})
+        if tree.this.upper() == 'EXPLAIN':
+            expression = tree.args.get('expression')
+            if type(expression) is not exp.Literal or not expression.is_string:
+                raise QueryError('EXPLAIN requires a vector SELECT')
+            tail = expression.this
+            tokens = sqlglot.Dialect.get_or_raise('duckdb').tokenize(tail)
+            mode = 'plan'
+            if tokens and tokens[0].token_type is TokenType.ANALYZE:
+                mode = 'analyze'
+                tail = tail[tokens[0].end + 1:]
+                tokens = sqlglot.Dialect.get_or_raise('duckdb').tokenize(tail)
+            if not tokens or tokens[0].token_type is not TokenType.SELECT:
+                raise QueryError('EXPLAIN requires a vector SELECT')
+            plan = classify_statement(tail)
+            if plan.kind != 'vector' or plan.explain is not None:
+                raise QueryError('EXPLAIN supports only vector SELECT')
+            return replace(plan, explain=mode)
         # SQLGlot represents SHOW DATABASES as Command; lex the narrow tail
         # to discard comments without admitting arbitrary command SQL.
         tail = sqlglot.Dialect.get_or_raise('duckdb').tokenize(str(tree.args.get('expression', '')))

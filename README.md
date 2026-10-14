@@ -19,7 +19,7 @@ conda create -n vecstor --file environments/vecstor-linux-64.explicit.txt
 
 依赖声明见 `environment.yml`。环境包含 Python、DuckDB、SQLGlot、Faiss CPU/GPU、gRPC/Protobuf 和 pytest。默认检查需要可用的 NVIDIA GPU 和本地 TCP 监听权限；沙箱受限时在沙箱外执行。仅验证 CPU 时可显式使用 `--cpu-only`。
 
-环境检查已通过，P1 本地基线、P2 gRPC 存算分离和 P2.5 交互式 SQL/持久 CRUD 已实现。当前业务路径使用 DuckDB SQL 与 NumPy 精确距离；Faiss ANN/GPU 业务调度在后续阶段实现。详细版本见 [环境说明](docs/environment.md)，项目计划见 [AGENTS.md](AGENTS.md)。
+环境检查已通过，P1 本地基线、P2 gRPC 存算分离和 P2.5 交互式 SQL/持久 CRUD 已实现。P3 已接入 CPU Faiss IVFFlat、两条近似路径、候选扩展和执行计划，默认仍为 NumPy float64 精确查询。GPU 业务调度、持久索引分发与自适应策略留待后续阶段。详细版本见 [环境说明](docs/environment.md)，项目计划见 [AGENTS.md](AGENTS.md)。
 
 ## 交互式 SQL 终端
 
@@ -41,6 +41,21 @@ vecstor --compute 127.0.0.1:50052
 进入后用 `.open demo --create` 建库/选库，直接输入 SQL。回车续行，分号后回车执行；支持表管理、INSERT/UPDATE/DELETE、普通 SELECT、聚合和内联向量查询。可用 `.help`、`.databases`、`.tables`、`.schema`、`.datasets`、`.import`。数据持久保存于存储服务，终端不打开数据库文件。
 
 完整示例、SQL 范围与隔离运行方法见 [终端使用说明](docs/sql-shell.md)。旧脚本和 P1/P2 入口保留兼容。
+
+## CPU 近似查询（P3）
+
+在已选库、已导入向量表（至少 1024 行）的终端中显式建索引并开启近似模式：
+
+```text
+.index build items
+.search mode approx
+.search path search-first
+.plan on
+```
+
+执行与精确模式相同的向量 SQL；用 `.search path filter-first` 切换先过滤路径，`.search reset` 恢复精确默认值。写入后旧索引失效，查询默认精确回退，再次 `.index build items` 恢复 ANN。`.index list` 查看版本；EXPLAIN/EXPLAIN ANALYZE 展示逻辑/实际计划。近似输出明确标识，精确重排候选不等于全局精确召回。
+
+完整命令、资源约束和实验入口见 [P3 使用说明](docs/p3-search.md)，验证结果见 [P3 验证记录](docs/validation/p3-faiss.md)。
 
 ## 本地混合查询
 

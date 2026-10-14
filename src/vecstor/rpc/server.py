@@ -20,6 +20,8 @@ def main(argv=None):
     compute.add_argument("--listen", default="127.0.0.1:50052")
     compute.add_argument("--timeout", type=float, default=10)
     compute.add_argument("--batch-rows", type=int, default=256)
+    compute.add_argument("--index-memory-mib",type=int,default=256)
+    compute.add_argument("--index-max-entries",type=int,default=8)
     compute.add_argument("--isolate-storage-dir", help="Linux acceptance: deny filesystem access before starting any worker")
     args = parser.parse_args(argv)
     try:
@@ -28,7 +30,8 @@ def main(argv=None):
                 from vecstor.isolation import restrict_compute_filesystem
                 print(json.dumps(restrict_compute_filesystem(args.isolate_storage_dir)), flush=True)
             from vecstor.compute.service import create_compute_server
-            server, port, backend = create_compute_server(args.storage, args.listen, args.timeout, args.batch_rows)
+            server, port, backend = create_compute_server(args.storage, args.listen, args.timeout, args.batch_rows,
+                                                        args.index_memory_mib,args.index_max_entries)
         else:
             if args.data_root:
                 from vecstor.storage.sql_service import create_catalog_server

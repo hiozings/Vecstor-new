@@ -32,7 +32,7 @@ def render_result(console, result, mode='table'):
         console.print(json.dumps(result, ensure_ascii=False), markup=False, highlight=False)
 
 
-def render_stream(console, stream, mode, page_size, continue_page):
+def render_stream(console, stream, mode, page_size, continue_page, show_plan=False):
     columns, page, total, complete = [], [], 0, None
     for event in stream:
         kind = event['kind']
@@ -55,4 +55,13 @@ def render_stream(console, stream, mode, page_size, continue_page):
         render_rows(console, columns, page, mode)
     affected = complete.get('affected_rows')
     console.print(f'{affected} affected' if affected is not None else f'{total} rows')
+    plan = complete.get('execution_plan')
+    if plan is not None:
+        if mode == 'json':
+            console.print(json.dumps({'execution_plan': plan}, ensure_ascii=False), markup=False, highlight=False, soft_wrap=True)
+        else:
+            actual = plan.get('actual_mode', plan.get('effective_mode', 'unknown'))
+            console.print(f"Search result mode: {actual}; fallback: {plan.get('fallback_reason') or 'none'}", markup=False)
+            if show_plan:
+                console.print(json.dumps(plan, ensure_ascii=False, indent=2), markup=False, highlight=False)
     return complete
