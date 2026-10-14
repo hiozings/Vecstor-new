@@ -45,8 +45,8 @@ def _bounded(message, context):
 
 
 class SQLStorageService(rpc.SQLStorageServicer):
-    def __init__(self, root):
-        self.catalog = DatabaseCatalog(root)
+    def __init__(self, root, candidate_binding="text",candidate_plan_cache=True):
+        self.catalog = DatabaseCatalog(root,candidate_binding,candidate_plan_cache)
         # Shared occupancy cap prevents either stream type from starving the
         # FetchVectors, BeginRead and EndRead unary handlers.
         self._stream_slots = BoundedSemaphore(4)
@@ -213,8 +213,8 @@ class SQLStorageService(rpc.SQLStorageServicer):
             self._stream_slots.release()
 
 
-def create_catalog_server(root, address):
-    backend = SQLStorageService(root)
+def create_catalog_server(root, address, candidate_binding="text",candidate_plan_cache=True):
+    backend = SQLStorageService(root,candidate_binding,candidate_plan_cache)
     server = grpc.server(ThreadPoolExecutor(max_workers=8), options=OPTIONS)
     rpc.add_SQLStorageServicer_to_server(backend, server)
     try:

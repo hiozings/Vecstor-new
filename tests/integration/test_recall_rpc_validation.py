@@ -37,3 +37,20 @@ def test_loaded_quality_profiles_match_frozen_results_under_isolation(tmp_path):
     assert report['passed'] and report['queries']==4
     assert not report['processes_running_after_cleanup']
     assert all(e['directory_denied'] and e['file_denied'] for e in report['isolation'])
+
+
+def test_rpc_binding_rejects_changed_calibration_data_before_sampling(tmp_path):
+    from vecstor.datasets import load_dataset,save_dataset
+    from vecstor.data import Dataset
+    base=Path(__file__).resolve().parents[2]/'benchmarks/p3'
+    cal=runpy.run_path(str(base/'calibrate.py'))
+    cal['run'](tmp_path/'cal',sizes=[1024],distributions=['independent'],dimension=4,
+               calibration_count=3,evaluation_count=4,selectivities=[1.])
+    source=tmp_path/'cal/1024-independent/dataset.npz';data=load_dataset(source)
+    values=data.values.copy();values[-1]=100000
+    altered=Dataset(data.ids,data.categories,data.timestamps,values,data.vectors)
+    source.unlink();save_dataset(altered,source)
+    validator=runpy.run_path(str(base/'validate_quality.py'))
+    import pytest
+    with pytest.raises(ValueError,match='fingerprint'):
+        validator['run'](tmp_path/'cal',tmp_path/'rpc',samples=1,repeats=1)

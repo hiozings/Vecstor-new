@@ -178,20 +178,46 @@ def run(output,sizes=(10000,100000),distributions=('independent','correlated','c
         old=json.loads((output/'config.json').read_text())
         stable=['sizes','distributions','dimension','calibration_count','evaluation_count','seed','selectivities','k','faiss','numpy']
         if any(old.get(k)!=config[k] for k in stable):raise ValueError('Resume configuration mismatch')
-        if old.get('source_sha256')!=config['source_sha256']:
-            if not isinstance(source_ruling,str) or not source_ruling.strip():
-                raise ValueError('Resume configuration source mismatch; an audited equivalent-source ruling is required')
-            audit=output/'source-transitions.json'
-            history=json.loads(audit.read_text()) if audit.exists() else []
-            transition={'from':old.get('source_sha256'),'to':config['source_sha256'],'reason':source_ruling}
-            if transition not in history:history.append(transition)
-            audit.write_text(json.dumps(history,indent=2))
+        for field, label in (('source_sha256','source'),('runner_sha256','runner')):
+            if old.get(field)!=config[field]:
+                if not isinstance(source_ruling,str) or not source_ruling.strip():
+                    raise ValueError(f'Resume configuration {label} mismatch; an audited equivalent-source ruling is required')
+                audit=output/f'{label}-transitions.json'
+                history=json.loads(audit.read_text()) if audit.exists() else []
+                transition={'from':old.get(field),'to':config[field],'reason':source_ruling}
+                if transition not in history:history.append(transition)
+                audit.write_text(json.dumps(history,indent=2))
         for line in (output/'heldout.jsonl').read_text().splitlines():
             r=json.loads(line);key=(r['size'],r['distribution'],r['workload']['selectivity'],r['workload']['path'])
             complete.setdefault(key,[]).append(r)
         for records in complete.values():
             if len(records)>evaluation_count or len({r['query_digest'] for r in records})!=len(records):
                 raise ValueError('Duplicate or excessive resume query evidence')
+        # Validate saved provenance even for fully completed scenarios before reusing evidence.
+        expected={(n,d,float(v),p) for n in sizes for d in distributions for v in selectivities
+                  for p in ('filter-first','search-first')}
+        if set(complete)-expected:raise ValueError('Unexpected resume workload')
+        for n,distribution in {(key[0],key[1]) for key in complete}:
+            directory=output/f'{n}-{distribution}'
+            fingerprint=dataset_digest(load_dataset(directory/'dataset.npz'))
+            cal,held=query_splits(dimension,calibration_count,evaluation_count,seed+n)
+            with np.load(directory/'queries.npz',allow_pickle=False) as saved:
+                if not np.array_equal(saved['calibration'],cal) or not np.array_equal(saved['evaluation'],held):
+                    raise ValueError('Resume query arrays differ from frozen split')
+            for key,records in complete.items():
+                if key[:2]!=(n,distribution):continue
+                frozen=json.loads((directory/f'{key[2]:g}-{key[3]}.json').read_text())
+                if frozen['dataset_sha256']!=fingerprint:raise ValueError('Resume dataset fingerprint mismatch')
+                if frozen['calibration_query_digests']!=list(map(digest_query,cal)):
+                    raise ValueError('Resume calibration query mismatch')
+                workload={'selectivity':key[2],'path':key[3],'k':10}
+                if frozen['workload']!=workload or not any(g['settings']==frozen['settings'] for g in frozen['grid']):
+                    raise ValueError('Resume frozen parameters mismatch')
+                for i,r in enumerate(records):
+                    if r['settings']!=frozen['settings'] or r['workload']!=workload:
+                        raise ValueError('Resume frozen parameters differ from recorded evidence')
+                    if r['query_digest']!=digest_query(held[i]):
+                        raise ValueError('Resume heldout query identity mismatch')
         partial=[key for key,records in complete.items() if len(records)!=evaluation_count]
         if partial:
             original=output/'heldout.jsonl';backup=output/'heldout-interrupted.jsonl'

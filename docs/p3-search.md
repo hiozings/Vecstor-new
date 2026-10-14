@@ -144,3 +144,5 @@ python benchmarks/p3/validate_quality.py --calibration-dir results/recall-calibr
   --existing-rpc-dir results/recall-rpc-validation-20261014 \
   --output-dir results/recall-profile-validation
 ```
+
+候选过滤默认批量绑定 ID，并在单条读租约内缓存一份有大小上限的谓词计划；可在存储启动时使用 `--candidate-binding legacy` 或 `--no-candidate-plan-cache` 做独立成本对照。执行计划新增 `selector_build_ms`、`native_search_ms` 与全量选择器快路统计。优化保持默认 exact、版本和租约行为；[最终质量与资源记录](validation/ann-recall-optimization.md) 给出适用范围及局限。

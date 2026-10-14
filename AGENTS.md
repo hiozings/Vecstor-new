@@ -62,7 +62,7 @@
 | gRPC / Protobuf | 查询、目录、类型化 SQL 结果与读租约 | grpcio/grpcio-tools 1.83.1、protobuf 7.35.1；兼容 P2 v1 并新增 P2.5 v2；索引分发待实现 |
 | prompt_toolkit / Rich | 多行终端、历史/补全与表格 | 3.0.53 / 15.0.0，已通过 Conda 安装并锁定 |
 | Arrow Flight | 批量列式数据传输 | 可选，只有测出传输瓶颈后再评估 |
-| pytest | 正确性、接口与集成测试 | 9.1.1；427 项 P1/P2/P2.5/P3 测试通过，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
+| pytest | 正确性、接口与集成测试 | 9.1.1；473 项 P1/P2/P2.5/P3/质量优化测试通过，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
 | 容器与部署脚本 | 隔离部署、复现实验 | 随原型补充，不先引入复杂集群平台 |
 
 安装状态与业务集成状态必须分开记录。通过 Conda 管理依赖，不混用 uv/pip 覆盖 Conda 管理的 Faiss、NumPy 和 CUDA 库。`environment.yml` 固定直接依赖，`environments/vecstor-linux-64.explicit.txt` 固定全部 Conda 包的构建和 MD5。保留 CPU 后端，GPU 计算使用本机已有设备。
@@ -101,7 +101,7 @@ P1、P2 与 P2.5 技术交付已完成。旧 P2 只读快照模式保留，P2.5 
 | P1 | 10/10—10/16 | 盘点已有工作、核对结题要求；固定数据格式、查询子集和技术版本；跑通 SQL、检索及索引读写 | 技术方案、组件示例、精确答案生成脚本可复现 |
 | P2 | 10/17—10/30 | 存储/计算服务、数据导入、批量读取、精确混合查询 | 端到端查询正确；计算服务无法直接访问存储目录仍可运行 |
 | P2.5 | 10/12 技术验收完成 | 交互式 SQL 终端、会话选库、托管数据导入、持久 CRUD 与读写一致性 | 319 项回归、真实终端、重启、P1 对照与 Landlock 读写验收通过 |
-| P3 | 10/13 CPU 技术验收完成（原排期 10/31—11/13） | CPU IVFFlat、两种执行路径、候选扩展、EXPLAIN/实际计划 | 427 项回归、1万行 PTY/Landlock、1万/10万×128维的360次实验通过；默认 ANN 召回率仍需调参 |
+| P3 | 10/13 CPU 技术验收完成（原排期 10/31—11/13） | CPU IVFFlat、两种执行路径、候选扩展、EXPLAIN/实际计划 | 427 项回归、1万行 PTY/Landlock、1万/10万×128维的360次实验通过；默认 ANN 召回率需按负载校准；显式质量配置验收见下文 |
 | P4 | 11/14—11/27 | 缓存、批量传输、策略选择、索引版本发布与批量更新 | 优化可独立开关；重启恢复、更新一致性测试通过 |
 | P5 | 11/28—12/11 | 性能对照、消融实验、两个计算节点版本切换 | 原始数据、图表、资源统计、局限性分析齐全 |
 | P6 | 12/12—12/25 | 修复问题、部署复现、报告与答辩演示 | 干净环境复现成功，材料形成可提交版本 |
@@ -111,7 +111,7 @@ P2.5 提前完成了 P4 的部分写入一致性基础，但不代表 ANN 索引
 
 P3 CPU 实现见 [使用说明](docs/p3-search.md)、[Faiss 执行设计](docs/design/p3-faiss-execution.md) 和 [六任务实施记录](docs/superpowers/plans/2026-10-13-p3-faiss.md)。保留默认精确模式，显式开启 CPU IVF 的 filter-first/search-first；按快照版本复用索引，候选不足可精确回退，并提供 EXPLAIN/ANALYZE 与实际执行统计。数据库级 revision 保持不变，其他表写入也保守失效。GPU、权威索引持久化/分发、批量维护和自适应策略仍未实现。360 次实验包含 120 次默认精确、168 次真正 ANN、72 次精确回退；默认参数未达到普遍 Recall@10≥0.95，见 [实测召回与资源记录](docs/validation/p3-faiss.md)。
 
-ANN 质量优化正在按计划实施，已新增正式校准工具，正在完成业务质量配置验收：见 [原因分析与成本评估](docs/design/ann-recall-optimization.md) 和 [Recall@10 优化实施计划](docs/superpowers/plans/2026-10-13-ann-recall-optimization.md)。用户确认以各分组平均 Recall@10≥0.95 为目标、暂无延迟硬上限。本次独立校准/留出探测显示提高 nprobe 可达标，但低通过率强制后过滤代价显著；现有默认参数保持不变，诊断结果不等同于正式质量配置功能交付。
+ANN 质量优化四阶段已完成：显式快照绑定配置、质量预算下限、查询内选择器复用及候选批量绑定/租约计划缓存。60 组各 500 个独立留出查询，最低平均 Recall@10=0.9702，零精确回退；最终 720 次隔离 RPC 对照及 96 组成本消融通过。默认 exact 与未选择配置时的 ANN 参数保持不变；不是任意数据或逐查询召回保证。见 [最终验收与成本](docs/validation/ann-recall-optimization.md) 和 [实施计划](docs/superpowers/plans/2026-10-13-ann-recall-optimization.md)。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -169,6 +169,7 @@ ANN 质量优化正在按计划实施，已新增正式校准工具，正在完�
 │       └── engine.py     # 本地 DuckDB 过滤、块式精确 Top-K
 ├── benchmarks/p3/
 │   ├── run.py            # 1万/10万行、两分布的原始 P3 矩阵
+│   ├── costs.py          # 训练参数探索、RPC 并发与绑定/缓存成本消融
 │   ├── calibrate.py      # 独立校准/留出、带簇负载、冻结配置与恢复运行
 │   └── validate_quality.py # 冻结参数 RPC 对照及实际快照绑定
 ├── configs/quality/       # 质量配置示例，绑定实际快照而非通用默认参数
@@ -188,12 +189,13 @@ ANN 质量优化正在按计划实施，已新增正式校准工具，正在完�
 │   ├── validation/p1-local-baseline.md # P1 验收结果与局限
 │   ├── validation/p2-grpc.md # P2 对照、隔离与审查修复证据
 │   ├── validation/p25-sql-shell.md # P2.5 终端、持久化、P1 对照和隔离证据
+│   ├── validation/ann-recall-optimization.md # 正式质量、成本、资源及隔离证据
 │   ├── validation/p3-faiss.md # P3 CPU 回归、隔离、召回实验与已知限制
 │   ├── superpowers/plans/2026-10-11-local-baseline.md # 执行计划与记录
 │   ├── superpowers/plans/2026-10-12-p2-grpc.md # P2 执行记录
 │   ├── superpowers/plans/2026-10-12-interactive-sql-shell.md # P2.5 执行计划与完成记录
 │   ├── superpowers/plans/2026-10-13-p3-faiss.md # P3 六任务实施计划
-│   ├── superpowers/plans/2026-10-13-ann-recall-optimization.md # 质量校准、配置与优化计划（未实施）
+│   ├── superpowers/plans/2026-10-13-ann-recall-optimization.md # 质量校准、配置与优化实施记录
 │   └── research/
 │       └── github-reference-survey.md # 相关仓库、复用入口与接入建议
 ├── data/                 # 已生成的本地示例，Git 忽略
@@ -306,3 +308,5 @@ src/vecstor/
 - 申报书首页及预算合计为 3000 元，预算大写处为“一千元”；采购前核对正式批复金额与可支出类别。
 - 关于现有数据库不足和技术空白的判断需通过最新文献核实，不直接将申报书表述当作已证明结论。
 - 最终交付：源码与固定依赖、部署说明、查询示例、基准脚本与数据说明、原始结果和图表、结题报告、答辩 PPT 与演示备份。
+
+候选过滤默认使用绑定 BIGINT[] 文本参数，每条活跃租约至多缓存一份谓词计划（原 SQL 与生成 SQL 各最多 64 KiB），结束租约释放。存储选项 `--candidate-binding legacy` 和 `--no-candidate-plan-cache` 用于独立消融；不是 P4 数据缓存。

@@ -193,3 +193,17 @@ def test_expired_ann_lease_cannot_be_replaced_by_local_index(populated):
     client.search_options=SearchOptions(mode='approx',path='search-first',nprobe=1)
     with pytest.raises(ValueError,match='lease|token'):
         client.execute(SQL)
+
+
+def test_filter_selector_is_prepared_once_across_candidate_rounds(populated):
+    client,_,_=populated
+    client.build_index('items',nlist=1)
+    client.search_options=SearchOptions(mode='approx',nprobe=1,candidates=1,fallback='error')
+    trace=client.execute(SQL)['execution_plan']
+    assert len(trace['rounds'])>=3
+    assert trace['counts']['selector_builds']==1
+    assert trace['selector_full_coverage'] is False
+    assert trace['native_search_ms']>=0 and trace['selector_build_ms']>=0
+    full=client.execute(SQL.replace('value >= 100','value >= 0'))['execution_plan']
+    assert full['counts']['selector_builds']==0
+    assert full['selector_full_coverage'] is True

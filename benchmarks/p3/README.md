@@ -43,3 +43,20 @@ python benchmarks/p3/validate_quality.py --calibration-dir results/recall-calibr
 ```
 
 为每个数据场景启动独立服务、导入对应 NPZ、显式构建同配置索引。每组默认取 4 个留出查询、重复三次，逐项核对返回 ID 与离线冻结结果及 float64 距离；这是 RPC 一致性证据，不能用四条查询替代 500 条独立质量验收。生成实际 database/table/revision/build 指纹绑定的 `quality-profiles.json`；原 nprobe=8 对照单独保留，精确回退不冒称 ANN 质量。
+
+加载导出的配置并在计算服务禁止读取存储目录时重验：
+
+```bash
+python benchmarks/p3/validate_quality.py --calibration-dir results/recall-calibration \
+  --existing-rpc-dir results/recall-rpc-validation --output-dir results/recall-profile-check
+python benchmarks/p3/costs.py native --calibration-dir results/recall-calibration \
+  --output-dir results/recall-native-costs
+python benchmarks/p3/costs.py rpc --calibration-dir results/recall-calibration \
+  --rpc-dir results/recall-rpc-validation --output-dir results/recall-rpc-costs
+```
+
+native 默认探索 10 万行独立数据的 12 种训练配置，64 校准/128 留出，只做诊断、不发布质量配置。rpc 使用现有快照与冻结质量配置，覆盖并发 1/4/8、绑定方式和计划缓存四种组合，各组 3 查询重复三次；记录实时 RSS 采样、CPU、P50/P95、吞吐及 RPC 字节。需要保留前一步生成的数据库，不可用重新导入的新快照替换。
+
+存储默认 `--candidate-binding text` 且开启租约内谓词计划缓存；以 `--candidate-binding legacy`、`--no-candidate-plan-cache` 独立消融。计划缓存不保存结果或向量，最多每活跃租约一份，租约结束即释放。性能结论和限制见 [最终验收](../../docs/validation/ann-recall-optimization.md)。
+
+恢复运行会检查源代码与 runner 摘要、数据指纹、实际查询数组及冻结配置与原记录的一致性。仅测试证明不改变查询数学语义的修复才可通过 `--resume-source-ruling '具体等价理由'` 记录审计后继续；真正算法或参数变更应新建输出目录重新校准，不可借该选项混用旧证据。

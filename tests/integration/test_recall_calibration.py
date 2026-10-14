@@ -119,3 +119,42 @@ def test_resume_source_change_requires_explicit_audited_ruling(tmp_path):
     assert audit[-1]['reason']=='Ownership-only fix, no ANN math change'
     with pytest.raises(ValueError,match='configuration'):
         m['run'](directory,resume=True,source_ruling='Ownership-only fix',**dict(arguments,seed=1))
+
+
+def test_resume_runner_change_requires_explicit_audit(tmp_path):
+    m=module();directory=tmp_path/'run'
+    arguments=dict(sizes=[1024],distributions=['independent'],dimension=2,
+                   calibration_count=2,evaluation_count=3,selectivities=[1.])
+    m['run'](directory,**arguments)
+    path=directory/'config.json';config=json.loads(path.read_text());config['runner_sha256']='0'*64
+    path.write_text(json.dumps(config))
+    with pytest.raises(ValueError,match='runner'):
+        m['run'](directory,resume=True,**arguments)
+    m['run'](directory,resume=True,source_ruling='Resume validation only; query math unchanged',**arguments)
+    history=json.loads((directory/'runner-transitions.json').read_text())
+    assert history[-1]['from']=='0'*64 and history[-1]['reason']
+
+
+def test_resume_cannot_relabel_completed_results_with_other_frozen_settings(tmp_path):
+    m=module();directory=tmp_path/'run'
+    arguments=dict(sizes=[1024],distributions=['independent'],dimension=4,
+                   calibration_count=3,evaluation_count=4,selectivities=[1.])
+    m['run'](directory,**arguments)
+    path=directory/'1024-independent/1-filter-first.json';frozen=json.loads(path.read_text())
+    frozen['settings']=next(g['settings'] for g in frozen['grid'] if g['settings']!=frozen['settings'])
+    path.write_text(json.dumps(frozen))
+    with pytest.raises(ValueError,match='frozen|parameters'):
+        m['run'](directory,resume=True,**arguments)
+
+
+def test_resume_rechecks_completed_group_dataset_and_query_identity(tmp_path):
+    from vecstor.datasets import load_dataset,save_dataset
+    from vecstor.data import Dataset
+    m=module();directory=tmp_path/'run'
+    arguments=dict(sizes=[1024],distributions=['independent'],dimension=2,
+                   calibration_count=2,evaluation_count=3,selectivities=[1.])
+    m['run'](directory,**arguments)
+    source=directory/'1024-independent/dataset.npz';data=load_dataset(source);values=data.values.copy();values[0]+=1
+    source.unlink();save_dataset(Dataset(data.ids,data.categories,data.timestamps,values,data.vectors),source)
+    with pytest.raises(ValueError,match='fingerprint'):
+        m['run'](directory,resume=True,**arguments)

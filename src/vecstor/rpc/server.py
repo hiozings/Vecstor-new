@@ -15,6 +15,8 @@ def main(argv=None):
     source=storage.add_mutually_exclusive_group(required=True)
     source.add_argument("--dataset", help="P2 legacy read-only snapshot")
     source.add_argument("--data-root", help="P2.5 managed persistent databases and imports")
+    storage.add_argument("--no-candidate-plan-cache",action="store_true",help="Disable lease-local predicate plan reuse for ablation")
+    storage.add_argument("--candidate-binding",choices=["text","legacy"],default="text",help="Candidate ID binding strategy for controlled ablation")
     storage.add_argument("--listen", default="127.0.0.1:50051")
     compute = commands.add_parser("compute")
     compute.add_argument("--storage", required=True)
@@ -45,7 +47,7 @@ def main(argv=None):
         else:
             if args.data_root:
                 from vecstor.storage.sql_service import create_catalog_server
-                server, port, backend = create_catalog_server(args.data_root, args.listen)
+                server, port, backend = create_catalog_server(args.data_root, args.listen,args.candidate_binding,not args.no_candidate_plan_cache)
             else:
                 from vecstor.storage.service import create_storage_server
                 server, port, backend = create_storage_server(args.dataset, args.listen)

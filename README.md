@@ -115,3 +115,5 @@ python scripts/check_p2.py --output-dir results/p2-check --distribution independ
 ```
 
 验收会自动创建独立服务、施加文件隔离、验证 16 条查询、停止存储后确认查询失败，并回收进程。输出目录必须不存在；沙箱限制网络监听时应在沙箱外运行。详细配置、错误行为与限制见 [P2 服务说明](docs/p2-services.md)。
+
+ANN 质量优化验收：60 组独立留出评估最低平均 Recall@10 为 0.9702，默认仍为精确查询。显式配置与实测延迟、资源、存算隔离证据见 [质量优化验收](docs/validation/ann-recall-optimization.md)；该统计不保证任意数据或每条查询达到同样召回。

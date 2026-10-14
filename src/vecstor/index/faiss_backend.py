@@ -1,5 +1,6 @@
 """Read-only IVF handles; all search tuning belongs to individual requests."""
 from io import BytesIO
+import time
 
 import faiss
 import numpy as np
@@ -17,6 +18,14 @@ def _ids(values):
 def _safe(dimension, max_abs):
     if max_abs > (.25 * float(np.finfo(np.float32).max) / (4.0 * dimension)) ** .5:
         raise ValueError('unsafe float32 distance range')
+
+
+class PreparedSelector:
+    """Query-local selector with owned IDs and explicit SWIG lifetime."""
+    def __init__(self,values):
+        self.ids=_ids(values).copy()
+        self.ids.setflags(write=False)
+        self._native=faiss.IDSelectorBatch(self.ids)
 
 
 class FaissIndex:
@@ -92,7 +101,15 @@ class FaissIndex:
             raise ValueError('incomplete index build')
         return cls(index, max_abs)
 
-    def search(self, query, count, nprobe, allowed_ids=None):
+    def prepare_selector(self,allowed_ids):
+        allowed=np.unique(_ids(allowed_ids))
+        if np.array_equal(allowed,self.ids):return None
+        positions=np.searchsorted(self.ids,allowed)
+        if np.any(positions>=len(self.ids)) or not np.array_equal(self.ids[positions],allowed):
+            raise ValueError('Selector contains IDs absent from the index snapshot')
+        return PreparedSelector(allowed)
+
+    def search(self, query, count, nprobe, allowed_ids=None, *, prepared_selector=None, statistics=None):
         query = np.asarray(query)
         if query.shape != (self.dimension,) or not np.isfinite(query).all():
             raise ValueError('invalid query vector')
@@ -101,16 +118,19 @@ class FaissIndex:
             raise ValueError('count must be positive')
         if isinstance(nprobe, bool) or not isinstance(nprobe, int) or not 1 <= nprobe <= self.nlist:
             raise ValueError('nprobe outside index range')
-        if allowed_ids is not None:
-            allowed = _ids(allowed_ids)
-            selector = faiss.IDSelectorBatch(allowed)
-            # Faiss' keyword constructor preserves SWIG caller ownership.
-            # Assigning params.sel afterwards transfers thisown=False and leaks
-            # the selector because SearchParameters does not own/delete it.
-            params = faiss.SearchParametersIVF(nprobe=nprobe, sel=selector)
-        else:
-            params = faiss.SearchParametersIVF(nprobe=nprobe)
-        distances, ids = self._index.search(np.ascontiguousarray(query, dtype=np.float32).reshape(1, -1), min(count, self.row_count), params=params)
+        if allowed_ids is not None and prepared_selector is not None:
+            raise ValueError('Cannot provide both raw and prepared filters')
+        if prepared_selector is not None and not isinstance(prepared_selector,PreparedSelector):
+            raise ValueError('Invalid prepared selector')
+        selector=PreparedSelector(allowed_ids) if allowed_ids is not None else prepared_selector
+        # The keyword constructor retains caller ownership of native selectors.
+        params=faiss.SearchParametersIVF(nprobe=nprobe,sel=selector._native) if selector is not None else faiss.SearchParametersIVF(nprobe=nprobe)
+        started=time.perf_counter()
+        try:
+            distances, ids = self._index.search(np.ascontiguousarray(query, dtype=np.float32).reshape(1, -1), min(count, self.row_count), params=params)
+        finally:
+            if statistics is not None:
+                statistics['native_search_ms']=statistics.get('native_search_ms',0.)+(time.perf_counter()-started)*1000
         valid = ids[0] != -1
         if not np.isfinite(distances[0][valid]).all():
             raise ValueError('nonfinite ANN distance')

@@ -34,9 +34,11 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
     trace={'plan_version':1,'requested_mode':options.mode,'requested_path':options.path,
            'actual_mode':None,'actual_path':None,'metric':'squared_l2','rerank_precision':'float64',
            'requested_k':plan.limit,'options':options.to_dict(),'rounds':[], 'index':None,
-           'fallback_reason':None,'exhaustive_buckets':False,'faiss_search_ms':0.0,'rerank_ms':0.0,
+           'fallback_reason':None,'exhaustive_buckets':False,'selector_full_coverage':False,
+           'selector_build_ms':0.,'native_search_ms':0.,'faiss_search_ms':0.0,'rerank_ms':0.0,
            'metadata_rows_scanned':None,'byte_accounting':'storage_protobuf_payloads'}
     io=LeaseIO(stub,request.database_id,plan.table,context,deadline,trace)
+    trace['counts']['selector_builds']=0
     try:
         lease=io.open();query=query_vector(plan.query_vector,lease.dimension).astype(np.float64)
         with registry.acquire(lease) as entry:
@@ -105,11 +107,18 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                         nprobe=options.nprobe if options.nprobe is not None else min(8,handle.nlist)
                         if nprobe>handle.nlist:raise ValueError('Explicit nprobe exceeds nlist')
                         seen=set();matched=0;stop='round_budget'
-                        selector=None if allowed_map is None else np.ascontiguousarray(list(allowed_map),dtype=np.int64)
+                        selector=None
+                        if allowed_map is not None:
+                            selector_start=time.perf_counter()
+                            try:selector=handle.prepare_selector(np.ascontiguousarray(list(allowed_map),dtype=np.int64))
+                            except ValueError as error:consistent(False,str(error))
+                            trace['selector_build_ms']=(time.perf_counter()-selector_start)*1000
+                            trace['counts']['selector_builds']=int(selector is not None)
+                            trace['selector_full_coverage']=selector is None
                         for round_number in range(1,options.max_rounds+1):
                             trace['exhaustive_buckets'] |= nprobe==handle.nlist
                             io.remaining();ann_start=time.monotonic()
-                            _,labels=handle.search(query.astype(np.float32),int(length),int(nprobe),selector)
+                            _,labels=handle.search(query.astype(np.float32),int(length),int(nprobe),prepared_selector=selector,statistics=trace)
                             trace['faiss_search_ms']+=(time.monotonic()-ann_start)*1000
                             io.remaining()
                             labels=[int(i) for i in labels if i!=-1]

@@ -21,6 +21,12 @@ from vecstor.rpc.sql_client import SessionClient
 def _hash(value):return hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
 
 
+def _dataset_digest(dataset):
+    digest=hashlib.sha256()
+    for value in (dataset.ids,dataset.vectors,dataset.values):digest.update(np.ascontiguousarray(value).tobytes())
+    return digest.hexdigest()
+
+
 def bind_profile(profile_id, built, sql, frozen, summary, heldout_digests):
     plan=classify_statement(sql).vector
     selected=next(r['summary'] for r in frozen['grid'] if r['settings']==frozen['settings'])
@@ -62,6 +68,10 @@ def run(calibration_dir, output_dir, samples=4, repeats=3):
                 root=directory/'storage';(root/'imports').mkdir(parents=True)
                 shutil.copy2(source/'dataset.npz',root/'imports/source.npz')
                 dataset=load_dataset(source/'dataset.npz')
+                actual_digest=_dataset_digest(dataset)
+                for frozen_file in source.glob('*-first.json'):
+                    frozen_check=json.loads(frozen_file.read_text())
+                    if frozen_check['dataset_sha256']!=actual_digest:raise ValueError('Calibration dataset fingerprint mismatch')
                 with np.load(source/'queries.npz',allow_pickle=False) as q:queries=q['evaluation'][:samples]
                 build=json.loads((source/'build.json').read_text())
                 with ExitStack() as cleanup:
@@ -135,6 +145,10 @@ def validate_loaded_profiles(calibration_dir, rpc_dir, output_dir, samples=4, re
                 root=(existing/f'{n}-{distribution}/storage').resolve()
                 source=calibration/f'{n}-{distribution}'
                 dataset=load_dataset(source/'dataset.npz')
+                actual_digest=_dataset_digest(dataset)
+                for frozen_file in source.glob('*-first.json'):
+                    frozen_check=json.loads(frozen_file.read_text())
+                    if frozen_check['dataset_sha256']!=actual_digest:raise ValueError('Calibration dataset fingerprint mismatch')
                 with np.load(source/'queries.npz',allow_pickle=False) as q:queries=q['evaluation'][:samples]
                 build=json.loads((source/'build.json').read_text())
                 with ExitStack() as cleanup:

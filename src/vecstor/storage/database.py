@@ -29,7 +29,12 @@ def result(columns=(), rows=(), affected_rows=None, **extra):
 
 
 class Database:
-    def __init__(self, path, name):
+    def __init__(self, path, name, candidate_binding="text", candidate_plan_cache=True):
+        if type(candidate_plan_cache) is not bool:raise ValueError("Invalid candidate plan cache flag")
+        self.candidate_plan_cache=candidate_plan_cache
+        self._candidate_plans={}
+        if candidate_binding not in {"text","legacy"}:raise ValueError("Invalid candidate binding")
+        self.candidate_binding=candidate_binding
         self.path, self.name = path, name
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"vecstor-{name}")
         self.leases = {}
@@ -212,8 +217,8 @@ class Database:
                 # parameter binding, and JSON preserves finite float32 values.
                 vectors = json.dumps(data.vectors[batch].tolist(), allow_nan=False, separators=(',', ':'))
                 self.connection.execute(
-                    f"INSERT INTO {identifier(table)} SELECT unnest(?::BIGINT[]), unnest(?::VARCHAR[]), "
-                    f"unnest(?::BIGINT[]), unnest(?::DOUBLE[]), unnest(?::FLOAT[{data.dimension}][])",
+                    f"INSERT INTO {identifier(table)} SELECT unnest(CAST(? AS BIGINT[])), unnest(?::VARCHAR[]), "
+                    f"unnest(CAST(? AS BIGINT[])), unnest(?::DOUBLE[]), unnest(?::FLOAT[{data.dimension}][])",
                     [data.ids[batch].tolist(), data.categories[batch].tolist(), data.timestamps[batch].tolist(),
                      data.values[batch].tolist(), vectors])
                 self._check_time()
@@ -279,23 +284,45 @@ class Database:
 
     def _filter_candidates(self, token, sql, ids):
         connection, _, lease = self._lease(token)
-        plan = classify_statement(sql)
-        if plan.vector is None or plan.table != lease["table"]:
-            raise ValueError("Candidate query does not match leased table")
-        if len(ids) > 1024 or len(set(ids)) != len(ids) or any(isinstance(i,bool) or not isinstance(i,int) or i < 0 for i in ids):
+        if len(ids) > 1024 or len(set(ids)) != len(ids) or any(isinstance(i,bool) or not isinstance(i,int) or not 0 <= i < 2**63 for i in ids):
             raise ValueError("Candidate IDs must be distinct nonnegative int64 values, at most 1024")
-        if not ids: return []
-        placeholders=','.join('?' for _ in ids)
-        present=connection.execute(f"SELECT id FROM {identifier(lease['table'])} WHERE id IN ({placeholders})",ids).fetchall()
-        if {r[0] for r in present} != set(ids):
+        marker=len(ids) if self.candidate_binding=='legacy' else None
+        cached=self._candidate_plans.get(token) if self.candidate_plan_cache else None
+        self._check_time()
+        if cached is not None and cached[:2]==(sql,marker):
+            statement_sql=cached[2]
+        else:
+            plan=classify_statement(sql)
+            if plan.vector is None or plan.table!=lease["table"]:
+                raise ValueError("Candidate query does not match leased table")
+            if not ids:return []
+            restriction=(sqlglot.parse_one('"id" IN (SELECT unnest(CAST(? AS BIGINT[])))',read='duckdb')
+                         if self.candidate_binding=='text' else
+                         exp.In(this=exp.column('id',quoted=True),expressions=[exp.Placeholder() for _ in ids]))
+            statement_sql=sqlglot.parse_one(plan.vector.metadata_sql,read="duckdb").where(restriction).sql(dialect="duckdb")
+            self._check_time()
+            # At most one bounded immutable plan per live lease; never cache data.
+            if self.candidate_plan_cache and max(len(sql.encode()),len(statement_sql.encode()))<=65536:
+                self._candidate_plans[token]=(sql,marker,statement_sql)
+            else:self._candidate_plans.pop(token,None)
+        if not ids:return []
+        if self.candidate_binding=='text':
+            parameters=[json.dumps(ids,separators=(',',':'))]
+            present=connection.execute(f"SELECT id FROM {identifier(lease['table'])} WHERE id IN (SELECT unnest(CAST(? AS BIGINT[])))",parameters).fetchall()
+        else:
+            parameters=ids
+            placeholders=','.join('?' for _ in ids)
+            present=connection.execute(f"SELECT id FROM {identifier(lease['table'])} WHERE id IN ({placeholders})",parameters).fetchall()
+        if {r[0] for r in present}!=set(ids):
             raise ValueError("Candidate ID does not exist in leased snapshot")
-        statement=sqlglot.parse_one(plan.vector.metadata_sql,read="duckdb")
-        statement=statement.where(exp.In(this=exp.column("id",quoted=True),expressions=[exp.Placeholder() for _ in ids]))
-        rows=connection.execute(statement.sql(dialect="duckdb"),ids).fetchall()
+        self._check_time()
+        rows=connection.execute(statement_sql,parameters).fetchall()
+        self._check_time()
         mapping={r[0]:r for r in rows}
         return [mapping[i] for i in ids if i in mapping]
 
     def _end_read(self, token):
+        self._candidate_plans.pop(token,None)
         lease = self.leases.pop(token, None)
         if lease:
             lease[0].execute("ROLLBACK")
