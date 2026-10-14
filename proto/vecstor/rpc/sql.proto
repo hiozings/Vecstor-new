@@ -20,6 +20,7 @@ message SearchOptions {
   optional uint32 max_candidates = 5;
   optional uint32 max_rounds = 6;
   string fallback = 7;
+  string quality_profile_id = 8;
 }
 message QueryExecutionPlan { string json_payload = 1; }
 message SQLRequest { string database_id = 1; string sql = 2; string operation_id = 3; SearchOptions search_options = 4; }

@@ -7,6 +7,7 @@ import grpc
 
 from vecstor.query.statements import classify_statement, safe_name
 from vecstor.query.search_options import SearchOptions
+from vecstor.query.quality_policy import QualityCatalog
 from vecstor.compute.index_manager import IndexManager
 from vecstor.compute.vector_execution import execute_vector
 from vecstor.rpc import sql_pb2 as pb, sql_pb2_grpc as rpc
@@ -15,7 +16,8 @@ from vecstor.rpc.sql_codec import encode_result
 
 
 class SQLComputeService(rpc.SQLComputeServicer):
-    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8):
+    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None):
+        self.quality_catalog=QualityCatalog.from_document(quality_document)
         self.channel = grpc.insecure_channel(address, options=OPTIONS)
         self.stub = rpc.SQLStorageStub(self.channel)
         self.timeout = timeout
@@ -60,7 +62,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 normalized=pb.SQLRequest.FromString(request.SerializeToString())
                 normalized.sql=plan.sql
                 output=execute_vector(self.stub,self.index_manager.registry,normalized,plan.vector,options,
-                                      context,deadline,explain=plan.explain)
+                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog)
                 output["elapsed_seconds"] = time.monotonic() - started
                 for frame in encode_result(output):
                     self._remaining(context, deadline)
@@ -82,7 +84,8 @@ class SQLComputeService(rpc.SQLComputeServicer):
 
     def GetSearchCapabilities(self,request,context):
         return pb.ControlResponse(json_result=json.dumps({'ann':True,'algorithm':'cpu_ivfflat',
-            'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':False}))
+            'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':False,
+            'quality_profiles':self.quality_catalog.list()}))
 
     def BuildIndex(self,request,context):
         try:

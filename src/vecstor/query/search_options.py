@@ -1,5 +1,12 @@
 """Immutable per-request search controls; absence preserves exact behavior."""
 from dataclasses import asdict, dataclass
+import re
+
+
+def validate_profile_id(value):
+    if not isinstance(value,str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}",value) or value in {"off","reset"}:
+        raise ValueError("Invalid quality profile ID")
+    return value
 
 
 @dataclass(frozen=True)
@@ -11,6 +18,7 @@ class SearchOptions:
     max_candidates: int | None = None
     max_rounds: int = 6
     fallback: str = 'exact'
+    quality_profile_id: str | None = None
 
     def validate(self):
         if self.mode not in ('exact', 'approx'):
@@ -19,6 +27,9 @@ class SearchOptions:
             raise ValueError('path must be filter-first or search-first')
         if self.mode == 'exact' and self.path != 'filter-first':
             raise ValueError('exact mode requires filter-first')
+        if self.quality_profile_id is not None:
+            validate_profile_id(self.quality_profile_id)
+            if self.mode!='approx':raise ValueError('Quality profile requires approximate mode')
         if self.fallback not in ('exact', 'error'):
             raise ValueError('fallback must be exact or error')
         for name in ('nprobe', 'candidates', 'max_candidates', 'max_rounds'):
@@ -32,7 +43,7 @@ class SearchOptions:
 
     @classmethod
     def from_proto(cls, value):
-        options = {name: getattr(value, name) for name in ('mode', 'path', 'fallback') if getattr(value, name)}
+        options = {name: getattr(value, name) for name in ('mode', 'path', 'fallback', 'quality_profile_id') if getattr(value, name)}
         options.update({name: getattr(value, name) for name in ('nprobe', 'candidates', 'max_candidates', 'max_rounds') if value.HasField(name)})
         return cls(**options).validate()
 

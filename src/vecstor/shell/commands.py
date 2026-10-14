@@ -18,6 +18,8 @@ End SQL with ; then Enter. Multiple statements commit independently.
 .search [reset|KEY VALUE] Show/reset search controls; mode exact|approx,
                          path filter-first|search-first, nprobe, candidates,
                          max-candidates, max-rounds, fallback exact|error
+.search profiles          List calibrated profiles for this database
+.search profile ID|off    Select/disable a snapshot-bound quality profile
 .index build TABLE [--nlist N] [--timeout S] Build CPU index
 .index list|clear [TABLE] Inspect/clear compute indexes
 .plan on|off              Toggle detailed execution plans
@@ -38,6 +40,8 @@ def dispatch(shell, text):
     if command == '.search':
         if not args:
             result = client.search_options.to_dict()
+        elif args == ['profiles']:
+            result = client.list_quality_profiles()
         elif args == ['reset']:
             result = client.reset_search()
         elif len(args) == 2:

@@ -111,7 +111,7 @@ P2.5 提前完成了 P4 的部分写入一致性基础，但不代表 ANN 索引
 
 P3 CPU 实现见 [使用说明](docs/p3-search.md)、[Faiss 执行设计](docs/design/p3-faiss-execution.md) 和 [六任务实施记录](docs/superpowers/plans/2026-10-13-p3-faiss.md)。保留默认精确模式，显式开启 CPU IVF 的 filter-first/search-first；按快照版本复用索引，候选不足可精确回退，并提供 EXPLAIN/ANALYZE 与实际执行统计。数据库级 revision 保持不变，其他表写入也保守失效。GPU、权威索引持久化/分发、批量维护和自适应策略仍未实现。360 次实验包含 120 次默认精确、168 次真正 ANN、72 次精确回退；默认参数未达到普遍 Recall@10≥0.95，见 [实测召回与资源记录](docs/validation/p3-faiss.md)。
 
-ANN 质量优化正在按计划实施，已新增正式校准工具，业务质量配置尚未接入：见 [原因分析与成本评估](docs/design/ann-recall-optimization.md) 和 [Recall@10 优化实施计划](docs/superpowers/plans/2026-10-13-ann-recall-optimization.md)。用户确认以各分组平均 Recall@10≥0.95 为目标、暂无延迟硬上限。本次独立校准/留出探测显示提高 nprobe 可达标，但低通过率强制后过滤代价显著；现有默认参数保持不变，诊断结果不等同于正式质量配置功能交付。
+ANN 质量优化正在按计划实施，已新增正式校准工具，正在完成业务质量配置验收：见 [原因分析与成本评估](docs/design/ann-recall-optimization.md) 和 [Recall@10 优化实施计划](docs/superpowers/plans/2026-10-13-ann-recall-optimization.md)。用户确认以各分组平均 Recall@10≥0.95 为目标、暂无延迟硬上限。本次独立校准/留出探测显示提高 nprobe 可达标，但低通过率强制后过滤代价显著；现有默认参数保持不变，诊断结果不等同于正式质量配置功能交付。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -164,7 +164,8 @@ ANN 质量优化正在按计划实施，已新增正式校准工具，业务质�
 │       ├── __init__.py
 │       ├── parser.py     # SQL AST 白名单、参数化过滤计划
 │       ├── statements.py # 普通 SQL/CRUD/库命令/内联向量/EXPLAIN 校验
-│       ├── search_options.py # 请求级精确/近似路径和候选预算
+│       ├── search_options.py # 请求级精确/近似路径、质量配置和候选预算
+│       ├── quality_policy.py # 快照/SQL 范围匹配、证据校验和质量预算
 │       └── engine.py     # 本地 DuckDB 过滤、块式精确 Top-K
 ├── benchmarks/p3/
 │   ├── run.py            # 1万/10万行、两分布的原始 P3 矩阵
@@ -256,6 +257,7 @@ src/vecstor/
 - CPU 构建使用新解释器和匿名管道；管道只由单次 communicate 的专用 I/O 线程操作，主线程检查取消/期限并终止、回收子进程，避免大输入分段重试阻塞。完整校验后、持锁再次检查取消才发布。
 - 默认索引驻留估算 256 MiB/8 条目、1 个构建任务；预估构建工作集加驻留量不超过预算两倍。先回收无引用旧版本，仍不满足则明确拒绝；此预算不等于 native RSS 硬限。
 - StreamVectorSnapshot 与 FilterCandidates 共用 4 个存储扫描名额，向量读取保留容量。先检索无回退时不得调用全量 ScanMetadata；FilterCandidates 只能处理指定 ID，未知 ID 不能作为普通过滤失败丢弃。
+- 质量配置为计算侧显式只读文件，至多 1 MiB/128 条；在 Landlock 前校验但禁止从 storage data-root 读取。必须匹配实际快照、AST metadata SQL、K/路径和查询范围；显式预算不足拒绝，旧服务忽略质量请求不能当作成功。
 - EXPLAIN 只获取租约/索引元信息；ANALYZE 只执行一次。计划统计必须反映实际模式、回退、候选轮次及 Protobuf 字节；未知物理扫描行数为 null，不在线虚构 Recall。
 - CPU 验收 `python scripts/check_p3.py --output-dir results/p3-check`；规模实验 `python benchmarks/p3/run.py --output-dir results/p3-matrix`。输出目录须不存在；完整命令及当前限制见 [P3 说明](docs/p3-search.md)。
 

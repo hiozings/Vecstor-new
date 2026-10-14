@@ -73,12 +73,12 @@
 - `resolve_quality(profile, actual_index_key, request_options) -> QualityBudget`：检查版本与参数冲突；不查询存储目录、不执行 WHERE。
 - `SearchOptions.quality_profile_id: str | None`：默认 None，保留原行为。`.search profile <id>|off` 显式选择；不增加名为“保证召回率”的开关。
 
-- [ ] 先写失败测试：候选已满但未达到 quality floor 不得以高质量成功；显式 nprobe 低于 floor、用户预算低于 profile 所需预算应报明确冲突，不静默忽略约束。
-- [ ] 增加缺失/错误版本 profile 测试，包括其他表写入、同名表重建、不同 nlist；默认允许有标识的精确回退，strict/error 模式明确失败。已开始的旧读仍使用匹配旧 profile。
-- [ ] 实现经过 schema 校验的计算侧只读配置加载；配置来自显式路径，在施加 Landlock 前读取和校验，不能借此打开存储路径。进入查询后以已固定的实际 IndexKey 原子匹配。
-- [ ] ANN 从 nprobe_floor 开始，减少无效早期轮次；在质量下限满足后，候选不足才继续扩展。已有显式更高 nprobe 可以保留；超出 nlist 拒绝。
-- [ ] v2 增量字段携带可选 profile_id；同步生成 proto。计划展示 requested/actual 参数、profile identity、校准范围、是否全桶及回退原因，不写虚假的 online Recall。
-- [ ] 通过旧客户端兼容、会话独立、版本/租约、严格预算、超时/取消和真实终端测试；默认 exact 不受影响。
+- [x] 先写失败测试：候选已满但未达到 quality floor 不得以高质量成功；显式 nprobe 低于 floor、用户预算低于 profile 所需预算应报明确冲突，不静默忽略约束。
+- [x] 增加缺失/错误版本 profile 测试，包括其他表写入、同名表重建、不同 nlist；默认允许有标识的精确回退，strict/error 模式明确失败。已开始的旧读仍使用匹配旧 profile。
+- [x] 实现经过 schema 校验的计算侧只读配置加载；配置来自显式路径，在施加 Landlock 前读取和校验，不能借此打开存储路径。进入查询后以已固定的实际 IndexKey 原子匹配。
+- [x] ANN 从 nprobe_floor 开始，减少无效早期轮次；在质量下限满足后，候选不足才继续扩展。已有显式更高 nprobe 可以保留；超出 nlist 拒绝。
+- [x] v2 增量字段携带可选 profile_id；同步生成 proto。计划展示 requested/actual 参数、profile identity、校准范围、是否全桶及回退原因，不写虚假的 online Recall。
+- [x] 通过旧客户端兼容、会话独立、版本/租约、严格预算、超时/取消和真实终端测试；默认 exact 不受影响。
 
 首版 profile 可以只支持已校准的显式路径，不要求自动识别任意过滤分布。未知工作负载必须提示未校准范围；不能把一个数据集上的配置描述为普适 0.95 保证。
 
@@ -109,3 +109,5 @@
 2026-10-14 Task 1：60 组正式评估通过，每组 200 校准/500 留出，最低平均 Recall@10=0.9702；435 项全套通过。先行修复阻塞长实验的 SWIG 选择器所有权泄漏，审计源码等价变更后恢复已冻结配置。Task 2—4 继续实施。
 
 2026-10-14 Task 2：60 组、720 次真实 RPC 返回 ID 与冻结结果一致，距离校验通过，所有进程已回收；436 项回归通过。绑定实际 IndexKey 的配置保存在验收产物，并提供单组示例。
+
+2026-10-14 Task 3：质量配置服务/终端/协议已接入；720 次加载配置的隔离 RPC 对照通过，6 个数据根读取均拒绝，进程回收；全桶标识不改变 approximate 标签。

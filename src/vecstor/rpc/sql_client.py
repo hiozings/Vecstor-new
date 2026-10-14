@@ -22,6 +22,7 @@ class SessionClient:
         self.last_was_write = False
         self.search_options = SearchOptions()
         self.last_search_mode = None
+        self._quality_supported=None
         self.channel = grpc.insecure_channel(address,options=OPTIONS)
         self.stub = rpc.SQLComputeStub(self.channel)
 
@@ -56,7 +57,19 @@ class SessionClient:
     def get_search_capabilities(self):
         return self._typed_control(self.stub.GetSearchCapabilities, Empty())
 
+    def list_quality_profiles(self):
+        caps=self.get_search_capabilities()
+        profiles=caps.get('quality_profiles') if isinstance(caps,dict) else None
+        if not isinstance(profiles,list):raise ValueError('Compute service does not support quality profiles')
+        self._quality_supported=True
+        return [p for p in profiles if p.get('database_id')==self.database_id]
+
     def set_search(self, name, value):
+        if name=='profile':name='quality_profile_id'
+        if name=='quality_profile_id':
+            if value=='off':value=None
+            elif value is not None and not any(p.get('profile_id')==value for p in self.list_quality_profiles()):
+                raise ValueError('Unknown quality profile for this database')
         name = name.replace('-', '_')
         if name not in self.search_options.to_dict():
             raise ValueError('Unknown search option')
@@ -106,6 +119,8 @@ class SessionClient:
         self.last_operation_id=operation_id or str(uuid.uuid4())
         request=pb.SQLRequest(database_id=self.database_id,sql=sql,operation_id=self.last_operation_id)
         if plan.kind == 'vector':
+            if self.search_options.quality_profile_id is not None and self._quality_supported is not True:
+                self.list_quality_profiles()
             request.search_options.CopyFrom(self.search_options.to_proto())
             self.last_search_mode = self.search_options.mode
         def events():
@@ -124,6 +139,12 @@ class SessionClient:
                     if event["kind"]=="rows" and any(len(row)!=width for row in event["rows"]):
                         raise ValueError("Result row width differs from schema")
                     if event["kind"]=="complete":
+                        profile_id=request.search_options.quality_profile_id
+                        if profile_id:
+                            execution=event.get('execution_plan') or {}
+                            quality=execution.get('quality_profile') or {}
+                            if quality.get('requested_id')!=profile_id or (execution.get('actual_mode')=='approx' and quality.get('state')!='applied'):
+                                raise ValueError('Compute service did not acknowledge/apply the quality profile')
                         complete=True
                         if event.get("selected_database_id"):
                             self.database_id=event["selected_database_id"]

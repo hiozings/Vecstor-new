@@ -106,3 +106,41 @@ python benchmarks/p3/run.py --output-dir results/p3-matrix
 `check_p3` 使用真实 PTY 与 Landlock，覆盖索引构建、双路径、候选扩展、P1 对照、写入失效/重建、计算重启及停存储。实验默认 10000/100000 行、128 维、独立/相关两类分布、五档选择率、K=10/100、三种模式、各重复三次，保存原始计划、真值/结果 ID、召回、延迟、内存及汇总；小规模调试可用 `--sizes 2048 --dimension 8 --repeats 1`。
 
 实验为本机串行、预建热索引，构建另计；P50/P95 每组仅三个样本，不能解释为生产性能保证。原始结果位于 Git 忽略的 results/，验证结论见 [P3 验证记录](validation/p3-faiss.md)。P4 再实现持久索引分发、批量增量维护、缓存和自适应策略；GPU 业务路径仍未实现。
+
+## 显式质量配置（2026-10-14）
+
+计算服务可在启动时加载计算侧自己的配置文件：
+
+```bash
+vecstor serve compute --storage 127.0.0.1:50051 \
+  --quality-profiles configs/quality/recall95-example.json
+```
+
+文件至多 1 MiB/128 个配置，在 Landlock 前读取并校验；不能放在被隔离的 storage data-root 内。配置只读驻留于内存，不从存储目录取配置，不在查询时训练或重新校准。
+
+终端先选择数据库、显式构建匹配索引，再选择配置：
+
+```text
+.search mode approx
+.search profiles
+.search profile q100000-independent-0p01-filter-first
+.plan on
+```
+
+示例只适用于配套验收数据根 `results/recall-rpc-validation-20261014/100000-independent/storage` 中的 `quality` 数据库、`items` 表、`value < 1000`、K=10 和先过滤路径；查询向量为 128 维且分量在 [0,1]。它不是任意数据集的通用默认值。重新导入会产生不同身份；自己的数据必须重新独立校准并通过真实 RPC 验证来导出对应文件。
+
+配置匹配完整 IndexKey、AST 校验后生成的 metadata SQL、K/路径和查询分量范围。查询向量可在校准范围内变化，投影可变化；不同过滤表达式即使语义等价也可能需要单独配置。数据 revision、同名表身份或构建参数改变后旧配置失效。已开始的旧读可以继续使用匹配旧快照的配置。
+
+配置将 nprobe/candidates/唯一候选预算提升至已校准下限；用户显式设置低于下限会返回 INVALID_ARGUMENT，不能以凑满 K 跳过质量下限。版本/范围/配置缺失按 fallback=exact/error 返回有记录的精确回退或 FAILED_PRECONDITION。小集合精确捷径、取消/期限和数据损坏行为保留。
+
+`.search profile off` 关闭配置，随后使用当前手动参数，未设置时仍为原 ANN 默认参数；`.search reset` 恢复默认精确模式。配置只作用于当前会话向量请求。新客户端会验证服务确认了 quality_profile，防止旧服务忽略新增字段后返回不满足要求的 ANN。
+
+执行计划新增 requested_id/state、配置版本、离线样本数量/均值和 effective_options。离线平均 Recall 不是当前查询的在线 Recall 或单条保证；未在实际工作负载校准的输入不能据此声称已经达到 0.95。
+
+正式加载与隔离验收：
+
+```bash
+python benchmarks/p3/validate_quality.py --calibration-dir results/recall-calibration-20261014 \
+  --existing-rpc-dir results/recall-rpc-validation-20261014 \
+  --output-dir results/recall-profile-validation
+```

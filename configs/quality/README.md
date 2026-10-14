@@ -4,4 +4,4 @@
 
 通过 `benchmarks/p3/calibrate.py` 独立校准，再用 `benchmarks/p3/validate_quality.py` 对照真实 RPC，生成环境对应的 `quality-profiles.json`。校准数据和大规模结果留在 results/，这里不保存原始向量或查询数据。离线平均质量不是单条查询保证。
 
-服务加载及终端选择接口将在后续质量配置接入任务提供；当前文件用于定义与审核格式。
+计算服务以 `--quality-profiles FILE` 显式加载，终端以 `.search profiles` 列表、`.search profile ID|off` 选择。文件放在计算侧配置目录，不能放在被隔离的存储根内；运行细节见 [P3 说明](../../docs/p3-search.md)。

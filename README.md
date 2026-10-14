@@ -55,6 +55,8 @@ vecstor --compute 127.0.0.1:50052
 
 执行与精确模式相同的向量 SQL；用 `.search path filter-first` 切换先过滤路径，`.search reset` 恢复精确默认值。写入后旧索引失效，查询默认精确回退，再次 `.index build items` 恢复 ANN。`.index list` 查看版本；EXPLAIN/EXPLAIN ANALYZE 展示逻辑/实际计划。近似输出明确标识，精确重排候选不等于全局精确召回。
 
+质量配置可由计算服务 `--quality-profiles FILE` 显式加载，再用 `.search profiles` 和 `.search profile ID|off` 选择；配置匹配实际数据/索引版本及查询条件，离线质量不等于单条保证。
+
 完整命令、资源约束和实验入口见 [P3 使用说明](docs/p3-search.md)，验证结果见 [P3 验证记录](docs/validation/p3-faiss.md)。
 
 正式独立质量校准可运行 `python benchmarks/p3/calibrate.py --output-dir results/recall-calibration`，默认每组 200 个校准查询和 500 个独立评估查询，包含带簇数据；详细恢复规则见 [实验说明](benchmarks/p3/README.md)。
