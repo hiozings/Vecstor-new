@@ -101,11 +101,15 @@ class FaissIndex:
             raise ValueError('count must be positive')
         if isinstance(nprobe, bool) or not isinstance(nprobe, int) or not 1 <= nprobe <= self.nlist:
             raise ValueError('nprobe outside index range')
-        params = faiss.SearchParametersIVF(nprobe=nprobe)
         if allowed_ids is not None:
             allowed = _ids(allowed_ids)
             selector = faiss.IDSelectorBatch(allowed)
-            params.sel = selector
+            # Faiss' keyword constructor preserves SWIG caller ownership.
+            # Assigning params.sel afterwards transfers thisown=False and leaks
+            # the selector because SearchParameters does not own/delete it.
+            params = faiss.SearchParametersIVF(nprobe=nprobe, sel=selector)
+        else:
+            params = faiss.SearchParametersIVF(nprobe=nprobe)
         distances, ids = self._index.search(np.ascontiguousarray(query, dtype=np.float32).reshape(1, -1), min(count, self.row_count), params=params)
         valid = ids[0] != -1
         if not np.isfinite(distances[0][valid]).all():

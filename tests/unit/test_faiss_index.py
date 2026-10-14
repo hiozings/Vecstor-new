@@ -304,3 +304,35 @@ def test_worker_stop_while_large_input_is_blocked_reaps_child(monkeypatch, stop)
     assert len(processes) == 1 and processes[0].poll() is not None
     assert all(pipe.closed for pipe in (processes[0].stdin, processes[0].stdout, processes[0].stderr))
     assert not any(thread.name == 'vecstor-index-transport' for thread in threading.enumerate())
+
+
+def test_repeated_large_selectors_do_not_leak_native_memory():
+    import json, os, subprocess, sys
+    code='''
+import gc,json
+from pathlib import Path
+import faiss,numpy as np
+from vecstor.index.faiss_backend import FaissIndex
+from vecstor.index.types import BuildConfig
+faiss.omp_set_num_threads(1)
+n=50000
+ids=np.arange(n,dtype=np.int64)
+vectors=np.random.default_rng(43).random((n,2),dtype=np.float32)
+index=FaissIndex.build(ids,vectors,BuildConfig(nlist=8))
+query=np.array([.5,.5],dtype=np.float32)
+def rss():
+    return int(next(line.split()[1] for line in Path('/proc/self/status').read_text().splitlines() if line.startswith('VmRSS:')))*1024
+for _ in range(10):index.search(query,64,8,ids)
+gc.collect();before=rss()
+for i in range(100):
+    index.search(query,64,8,ids)
+    if rss()-before>80*1024*1024:break
+gc.collect()
+print(json.dumps({'growth_bytes':rss()-before,'iterations':i+1}))
+'''
+    result=subprocess.run([sys.executable,'-c',code],capture_output=True,text=True,timeout=30,
+                          env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1'))
+    assert result.returncode==0,result.stderr
+    report=json.loads(result.stdout)
+    assert report['growth_bytes']<32*1024*1024,report
+    assert report['iterations']==100

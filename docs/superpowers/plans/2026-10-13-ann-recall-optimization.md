@@ -44,12 +44,12 @@
 
 **Interfaces:** `calibrate(dataset, calibration_queries, options_grid, workload) -> CalibrationResult`；`evaluate(dataset, heldout_queries, frozen_config) -> QualityReport`。结果含 query_id/seed、真值与召回 ID、实际模式、参数、完整回退原因；配置选择只接收 calibration 结果。
 
-- [ ] 先写小样本回归：查询 seed 不重叠；更换 heldout 数据不能改变所选参数；空真值独立统计；实际 exact 不计入真正 ANN 的均值。
-- [ ] 运行新增测试，确认缺少校准接口而失败。
-- [ ] 实现至少 200 校准/500 留出查询每组；1 万/10 万×128、两类既有分布、五档通过率、K=10；另加入带簇负载，真实 embedding 在确认来源和许可后单列。
-- [ ] nprobe 网格覆盖 8→nlist，选择 calibration mean≥0.97 的最小值作为初始余量规则；发布前要求 heldout group mean≥0.95，并报告查询级 bootstrap 95% CI、最差值、回退/不足比例。
-- [ ] 将本次“L 64→4096、nprobe固定时召回不升”的消融、global required_L 分布及 nprobe=nlist 对照纳入脚本。全桶对照单独标明，不当作 ANN 加速结果。
-- [ ] 验证新测试及原实验工具；输出原始数据、源代码/依赖/索引版本和配置选择记录。
+- [x] 先写小样本回归：查询 seed 不重叠；更换 heldout 数据不能改变所选参数；空真值独立统计；实际 exact 不计入真正 ANN 的均值。
+- [x] 运行新增测试，确认缺少校准接口而失败。
+- [x] 实现至少 200 校准/500 留出查询每组；1 万/10 万×128、两类既有分布、五档通过率、K=10；另加入带簇负载，真实 embedding 在确认来源和许可后单列。
+- [x] nprobe 网格覆盖 8→nlist，选择 calibration mean≥0.97 的最小值作为初始余量规则；发布前要求 heldout group mean≥0.95，并报告查询级 bootstrap 95% CI、最差值、回退/不足比例。
+- [x] 将本次“L 64→4096、nprobe固定时召回不升”的消融、global required_L 分布及 nprobe=nlist 对照纳入脚本。全桶对照单独标明，不当作 ANN 加速结果。
+- [x] 验证新测试及原实验工具；输出原始数据、源代码/依赖/索引版本和配置选择记录。
 
 ## Task 2：使用现有接口验证高召回配置与路径边界
 
@@ -105,3 +105,5 @@
 - 运行 17280 条离线参数探测、独立校准/留出评估、候选量消融与查询级置信区间计算。
 - 在克隆数据库上完成 360 次真实 gRPC 成本对照；未修改默认配置或产品代码。
 - 分析结果见设计文档；以上 Task 1—4 尚未实施，不将诊断脚本当作已交付的质量配置功能。
+
+2026-10-14 Task 1：60 组正式评估通过，每组 200 校准/500 留出，最低平均 Recall@10=0.9702；435 项全套通过。先行修复阻塞长实验的 SWIG 选择器所有权泄漏，审计源码等价变更后恢复已冻结配置。Task 2—4 继续实施。

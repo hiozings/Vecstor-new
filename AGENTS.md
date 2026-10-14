@@ -2,7 +2,7 @@
 
 本文件适用于整个项目，供团队成员与开发代理共同遵循。记录项目实施计划、目录结构、技术栈和开发约束；后续开发应同步维护，避免文档与实际实现脱节。
 
-最后更新：2026-10-13。
+最后更新：2026-10-14。
 
 ## 1. 项目背景与当前状态
 
@@ -111,7 +111,7 @@ P2.5 提前完成了 P4 的部分写入一致性基础，但不代表 ANN 索引
 
 P3 CPU 实现见 [使用说明](docs/p3-search.md)、[Faiss 执行设计](docs/design/p3-faiss-execution.md) 和 [六任务实施记录](docs/superpowers/plans/2026-10-13-p3-faiss.md)。保留默认精确模式，显式开启 CPU IVF 的 filter-first/search-first；按快照版本复用索引，候选不足可精确回退，并提供 EXPLAIN/ANALYZE 与实际执行统计。数据库级 revision 保持不变，其他表写入也保守失效。GPU、权威索引持久化/分发、批量维护和自适应策略仍未实现。360 次实验包含 120 次默认精确、168 次真正 ANN、72 次精确回退；默认参数未达到普遍 Recall@10≥0.95，见 [实测召回与资源记录](docs/validation/p3-faiss.md)。
 
-ANN 质量后续优化已完成分析与规划，尚未接入业务：见 [原因分析与成本评估](docs/design/ann-recall-optimization.md) 和 [Recall@10 优化实施计划](docs/superpowers/plans/2026-10-13-ann-recall-optimization.md)。用户确认以各分组平均 Recall@10≥0.95 为目标、暂无延迟硬上限。本次独立校准/留出探测显示提高 nprobe 可达标，但低通过率强制后过滤代价显著；现有默认参数保持不变，诊断结果不等同于正式质量配置功能交付。
+ANN 质量优化正在按计划实施，已新增正式校准工具，业务质量配置尚未接入：见 [原因分析与成本评估](docs/design/ann-recall-optimization.md) 和 [Recall@10 优化实施计划](docs/superpowers/plans/2026-10-13-ann-recall-optimization.md)。用户确认以各分组平均 Recall@10≥0.95 为目标、暂无延迟硬上限。本次独立校准/留出探测显示提高 nprobe 可达标，但低通过率强制后过滤代价显著；现有默认参数保持不变，诊断结果不等同于正式质量配置功能交付。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -166,7 +166,9 @@ ANN 质量后续优化已完成分析与规划，尚未接入业务：见 [原�
 │       ├── statements.py # 普通 SQL/CRUD/库命令/内联向量/EXPLAIN 校验
 │       ├── search_options.py # 请求级精确/近似路径和候选预算
 │       └── engine.py     # 本地 DuckDB 过滤、块式精确 Top-K
-├── benchmarks/p3/run.py  # 1万/10万行、两分布的真值/Recall/实际计划与性能矩阵
+├── benchmarks/p3/
+│   ├── run.py            # 1万/10万行、两分布的原始 P3 矩阵
+│   └── calibrate.py      # 独立校准/留出、带簇负载、冻结配置与恢复运行
 ├── tests/
 │   ├── unit/             # 数据、SQL、持久事务、协议、终端输入与 PTY 测试
 │   └── integration/      # CLI、RPC、真实终端、并发/超时、重启与文件隔离测试

@@ -57,6 +57,8 @@ vecstor --compute 127.0.0.1:50052
 
 完整命令、资源约束和实验入口见 [P3 使用说明](docs/p3-search.md)，验证结果见 [P3 验证记录](docs/validation/p3-faiss.md)。
 
+正式独立质量校准可运行 `python benchmarks/p3/calibrate.py --output-dir results/recall-calibration`，默认每组 200 个校准查询和 500 个独立评估查询，包含带簇数据；详细恢复规则见 [实验说明](benchmarks/p3/README.md)。
+
 ## 本地混合查询
 
 以下命令在项目根目录和 `vecstor` 环境中执行。无需 pip 安装本项目，命令行入口会加载 `src/`。
