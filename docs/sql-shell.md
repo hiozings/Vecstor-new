@@ -128,3 +128,5 @@ python scripts/check_shell.py --output-dir results/my-shell-check --rows 10000
 ```
 
 第二条命令通过真实 PTY 驱动终端，验证双库、CRUD、导入、向量与 P1 对照、重启、写状态以及 Landlock；回收所有服务和终端进程。输出目录必须不存在，报告和终端记录在该目录下。这是正确性验收，不是性能基准。详见 [P2.5 验收记录](validation/p25-sql-shell.md)。
+
+GPU ANN 可通过向量 SQL 的 SETTINGS 逐语句选择，并显式 `.index build 表名 --device gpu`。首期仅先检索，使用方法和限制见 [GPU 使用说明](gpu-search.md)。

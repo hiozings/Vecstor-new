@@ -63,7 +63,7 @@ vecstor serve compute --storage 127.0.0.1:50051 \
   --gpu-scratch-mib 128 --gpu-memory-margin-mib 256 --gpu-max-pending 8
 ```
 
-GPU默认单任务运行、最多8个等待任务；索引预算为估算字节，不是进程或整块设备的硬内存上限。还需计入context、scratch、克隆临时数据以及其他程序占用。达到限制会拒绝或清理无引用副本，不强制驱逐活跃查询。
+GPU默认单任务运行、最多8个等待任务，单次索引IPC负载至多512 MiB；索引预算为估算字节，不是进程或整块设备的硬内存上限。还需计入context、scratch、克隆临时数据以及其他程序占用。达到限制会拒绝或清理无引用副本，不强制驱逐活跃查询。
 
 `--isolate-storage-dir data/catalog` 可验证计算进程和GPU worker均不能读取存储目录/文件，查询仍通过RPC完成。CUDA驱动需要读procfs/CPU拓扑、写既有procfs伪文件为后代辅助线程命名，以及访问特定NVIDIA字符设备。GPU隔离策略为此增加相应权限，不允许在procfs新建/删除文件；它是可信本地进程的存储文件访问隔离，不是针对恶意同用户进程的通用安全沙箱。CUDA磁盘缓存关闭，质量配置仍必须位于存储根之外。
 
@@ -78,3 +78,7 @@ python benchmarks/gpu/calibrate.py --output-dir results/my-gpu-calibration
 ```
 
 输出目录必须不存在。每组200校准/500留出，冻结参数后评估；不支持组与评估失败组完整保留，没有CPU回退混入GPU均值。校准文件不能直接代替实际数据库身份绑定的服务配置。质量结果与能力限制见 [GPU验收](validation/gpu-ann.md)。
+
+GPU构建和定向清理同样需要服务声明支持设备控制并确认响应设备；旧服务不能忽略device后把CPU构建报告成GPU成功，也不能因忽略设备参数误清CPU索引。
+
+完整校准后可用 `python benchmarks/gpu/run.py --calibration-dir results/my-gpu-calibration --output-dir results/my-gpu-rpc` 做真实RPC校验并导出 `quality-profiles.json`。该工具针对校准生成的合成负载和新建验收库；不支持把这些配置直接用于任意已有用户库。自有数据需要独立校准并绑定自己的实际快照。流程、产物及短实验限制见 [GPU实验入口](../benchmarks/gpu/README.md)。
