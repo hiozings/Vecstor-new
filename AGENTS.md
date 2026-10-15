@@ -2,7 +2,7 @@
 
 本文件适用于整个项目，供团队成员与开发代理共同遵循。记录项目实施计划、目录结构、技术栈和开发约束；后续开发应同步维护，避免文档与实际实现脱节。
 
-最后更新：2026-10-14。
+最后更新：2026-10-15。
 
 ## 1. 项目背景与当前状态
 
@@ -113,6 +113,8 @@ P3 CPU 实现见 [使用说明](docs/p3-search.md)、[Faiss 执行设计](docs/d
 
 ANN 质量优化四阶段已完成：显式快照绑定配置、质量预算下限、查询内选择器复用及候选批量绑定/租约计划缓存。60 组各 500 个独立留出查询，最低平均 Recall@10=0.9702，零精确回退；最终 720 次隔离 RPC 对照及 96 组成本消融通过。默认 exact 与未选择配置时的 ANN 参数保持不变；不是任意数据或逐查询召回保证。见 [最终验收与成本](docs/validation/ann-recall-optimization.md) 和 [实施计划](docs/superpowers/plans/2026-10-13-ann-recall-optimization.md)。
 
+GPU ANN 下一阶段处于规划、待评审状态：用户确认首期只加速 ANN 检索，CPU 训练、精确基线与 float64 重排保持不变。拟以 SQL SETTINGS 逐请求选择设备，先接入 GPU search-first；能力边界、显存与故障管理、GPU 独立质量证据见 [设计](docs/design/gpu-ann-execution.md) 和 [实施计划](docs/superpowers/plans/2026-10-15-gpu-ann.md)。尚未实现，不代表 GPU 业务查询可用。
+
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
 ### 团队协作
@@ -177,6 +179,7 @@ ANN 质量优化四阶段已完成：显式快照绑定配置、质量预算下�
 │   ├── unit/             # 数据、SQL、持久事务、协议、终端输入与 PTY 测试
 │   └── integration/      # CLI、RPC、真实终端、并发/超时、重启与文件隔离测试
 ├── docs/
+│   ├── user-guide.md     # 面向用户的安装启动、SQL、导入、ANN、运维与排错说明书
 │   ├── environment.md    # 环境使用、复现及验证记录
 │   ├── p2-services.md    # P2 启停、查询、隔离验收与限制
 │   ├── sql-shell.md      # P2.5 安装入口、界面、SQL 范围与使用方法
@@ -185,6 +188,7 @@ ANN 质量优化四阶段已完成：显式快照绑定配置、质量预算下�
 │   ├── design/p2-grpc.md  # P2 协议、快照与隔离设计
 │   ├── design/interactive-sql-shell.md # P2.5 终端与可写数据库设计
 │   ├── design/p3-faiss-execution.md # P3 索引、两路径与计划展示设计
+│   ├── design/gpu-ann-execution.md # GPU ANN 与 SQL 设备选择设计（待实施）
 │   ├── design/ann-recall-optimization.md # 低召回原因、校准证据和成本评估
 │   ├── validation/p1-local-baseline.md # P1 验收结果与局限
 │   ├── validation/p2-grpc.md # P2 对照、隔离与审查修复证据
@@ -195,6 +199,7 @@ ANN 质量优化四阶段已完成：显式快照绑定配置、质量预算下�
 │   ├── superpowers/plans/2026-10-12-p2-grpc.md # P2 执行记录
 │   ├── superpowers/plans/2026-10-12-interactive-sql-shell.md # P2.5 执行计划与完成记录
 │   ├── superpowers/plans/2026-10-13-p3-faiss.md # P3 六任务实施计划
+│   ├── superpowers/plans/2026-10-15-gpu-ann.md # GPU 六阶段实施计划（待实施）
 │   ├── superpowers/plans/2026-10-13-ann-recall-optimization.md # 质量校准、配置与优化实施记录
 │   └── research/
 │       └── github-reference-survey.md # 相关仓库、复用入口与接入建议
