@@ -72,13 +72,20 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                 if entry:
                     try:
                         if quality_catalog is None:raise QualityUnavailable('quality_profile_missing')
-                        if device=='gpu':raise QualityUnavailable('quality_profile_backend_mismatch')
                         options,description=quality_catalog.resolve(options.quality_profile_id,entry.key,entry.handle.nlist,
-                                                                    entry.handle.row_count,plan,options)
+                                                                    entry.handle.row_count,plan,replace(options,device=device),execution=entry.statistics)
                         trace['quality_profile']=description
                     except QualityUnavailable as error:
                         quality_problem=error.reason
-                        trace['quality_profile'].update(state='unavailable',reason=quality_problem)
+                        if device=='gpu' and options.device_fallback=='cpu' and cpu_entry is not None:
+                            device_failure(error.reason)
+                            entry=cpu_entry;device='cpu';trace['index']=entry.describe()
+                            try:
+                                options,description=quality_catalog.resolve(options.quality_profile_id,entry.key,entry.handle.nlist,
+                                    entry.handle.row_count,plan,replace(options,device='cpu'))
+                                trace['quality_profile']=description;quality_problem=None
+                            except QualityUnavailable as cpu_error:quality_problem=cpu_error.reason
+                        if quality_problem:trace['quality_profile'].update(state='unavailable',reason=quality_problem)
                 trace['effective_options']=options.to_dict()
             if explain=='plan':
                 trace.update(actual_device='not_executed',actual_mode='not_executed',actual_path='not_executed',

@@ -57,3 +57,34 @@ def test_concurrent_gpu_and_cpu_sessions_keep_request_options(tmp_path):
                 assert result['execution_plan']['actual_device']==('gpu' if number%2 else 'cpu')
                 assert other.search_options.device=='cpu'
         with ThreadPoolExecutor(4) as pool:list(pool.map(query,range(8)))
+
+
+def test_gpu_read_lease_survives_concurrent_write(tmp_path,monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from vecstor.compute.lease_io import LeaseIO
+    with servers(tmp_path) as (address,_),SessionClient(address) as c:
+        c.open_database('demo',True);save_dataset(generate_dataset(2048,3),tmp_path/'imports/a.npz');c.import_dataset('a.npz','items');c.build_index('items',nlist=1,device='gpu')
+        expected=c.execute(SQL)['rows'];ready=threading.Event();resume=threading.Event();original=LeaseIO.open
+        def paused(io):
+            result=original(io);ready.set();assert resume.wait(5);return result
+        monkeypatch.setattr(LeaseIO,'open',paused)
+        def old_read():
+            with SessionClient(address) as other:other.open_database('demo');return other.execute(SQL+GPU)
+        with ThreadPoolExecutor(1) as pool:
+            pending=pool.submit(old_read)
+            try:
+                assert ready.wait(5);c.execute('UPDATE items SET value=2000 WHERE value<1000')
+            finally:resume.set()
+            assert pending.result(timeout=5)['rows']==expected
+        monkeypatch.setattr(LeaseIO,'open',original)
+        with pytest.raises(ValueError,match='gpu_replica_missing'):c.execute(SQL+GPU)
+
+
+def test_clear_gpu_replica_preserves_cpu_index(tmp_path):
+    with servers(tmp_path) as (address,_),SessionClient(address) as c:
+        c.open_database('demo',True);save_dataset(generate_dataset(2048,3),tmp_path/'imports/a.npz');c.import_dataset('a.npz','items');c.build_index('items',nlist=1,device='gpu')
+        assert c.clear_indexes('items',device='gpu')['removed']==1
+        assert all(i['device']=='cpu' for i in c.list_indexes())
+        with pytest.raises(ValueError,match='gpu_replica_missing'):c.execute(SQL+GPU)
+        assert c.execute(SQL+GPU.replace("device='gpu'","device='cpu'"))['execution_plan']['actual_mode']=='approx'

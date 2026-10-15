@@ -35,7 +35,7 @@ Example: .open demo --create
 def dispatch(shell, text):
     parts = shlex.split(text)
     command, args = parts[0], parts[1:]
-    arities = {'.help': (0,), '.databases': (0,), '.open': (1, 2), '.datasets': (0,), '.import': (2,), '.tables': (0,), '.schema': (0, 1), '.status': (1,), '.mode': (1,), '.timer': (1,), '.clear': (0,), '.quit': (0,), '.search': (0, 1, 2), '.index': (1, 2, 4, 6, 8, 10), '.plan': (1,)}
+    arities = {'.help': (0,), '.databases': (0,), '.open': (1, 2), '.datasets': (0,), '.import': (2,), '.tables': (0,), '.schema': (0, 1), '.status': (1,), '.mode': (1,), '.timer': (1,), '.clear': (0,), '.quit': (0,), '.search': (0, 1, 2), '.index': (1, 2, 3, 4, 6, 8, 10), '.plan': (1,)}
     if command not in arities or len(args) not in arities[command]:
         raise ValueError('Unknown command or invalid arguments. Use .help.')
     client = shell.client
@@ -57,9 +57,13 @@ def dispatch(shell, text):
         shell.show_plan = args[0] == 'on'
     elif command == '.index':
         action = args[0]
-        if action in ('list', 'clear') and len(args) <= 2:
-            method = client.list_indexes if action == 'list' else client.clear_indexes
-            result = method(args[1] if len(args) == 2 else '')
+        if action == 'list' and len(args)<=2:
+            result=client.list_indexes(args[1] if len(args)==2 else '')
+        elif action=='clear':
+            rest=args[1:];table=rest.pop(0) if rest and not rest[0].startswith('--') else ''
+            if rest and (len(rest)!=2 or rest[0]!='--device' or rest[1] not in ('cpu','gpu')):
+                raise ValueError('Usage: .index clear [TABLE] [--device cpu|gpu]')
+            result=client.clear_indexes(table,device=rest[1] if rest else '')
         elif action == 'build' and len(args) >= 2:
             options = {}
             for index in range(2, len(args), 2):

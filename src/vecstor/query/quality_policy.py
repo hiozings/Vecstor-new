@@ -51,11 +51,18 @@ class QualityProfile:
     query_max:float
     budget:QualityBudget
     evidence:tuple
+    execution:tuple=()
 
     @classmethod
     def parse(cls,value):
-        _fields(value,['format_version','profile_id','index_key','workload','budget','evidence'])
-        if type(value['format_version']) is not int or value['format_version']!=1:raise ValueError('Unsupported quality profile version')
+        version=value.get('format_version') if isinstance(value,dict) else None
+        if type(version) is not int or version not in (1,2):raise ValueError('Unsupported quality profile version')
+        _fields(value,['format_version','profile_id','index_key','workload','budget','evidence']+(['execution'] if version==2 else []))
+        execution={}
+        if version==2:
+            execution=_fields(value['execution'],['device','precision','faiss_version','gpu_model'])
+            if execution['device'] not in ('cpu','gpu') or execution['precision']!='float32':raise ValueError('Invalid quality backend')
+            for name in ['faiss_version','gpu_model']:_text(execution[name])
         profile_id=validate_profile_id(value['profile_id'])
         raw=_fields(value['index_key'],IndexKey.__dataclass_fields__)
         for name in ['database_id','table_id','schema_version','build_fingerprint']:_text(raw[name])
@@ -81,11 +88,11 @@ class QualityProfile:
             x=_text(evidence[name],64)
             if len(x)!=64 or any(c not in '0123456789abcdef' for c in x):raise ValueError('Invalid quality evidence digest')
         _text(evidence['scope'])
-        return cls(profile_id,key,work['metadata_sql'],work['k'],work['path'],minimum,maximum,budget,tuple(sorted(evidence.items())))
+        return cls(profile_id,key,work['metadata_sql'],work['k'],work['path'],minimum,maximum,budget,tuple(sorted(evidence.items())),tuple(sorted(execution.items())))
 
     def describe(self):
         evidence=dict(self.evidence)
-        return {'profile_id':self.profile_id,'database_id':self.key.database_id,'table_id':self.key.table_id,'revision':self.key.revision,
+        return {'device':dict(self.execution).get('device','cpu'),'backend_evidence':dict(self.execution),'profile_id':self.profile_id,'database_id':self.key.database_id,'table_id':self.key.table_id,'revision':self.key.revision,
                 'path':self.path,'k':self.k,'metadata_sql':self.metadata_sql,'budget':asdict(self.budget),
                 'calibration_queries':evidence['calibration_queries'],'evaluation_queries':evidence['evaluation_queries'],
                 'evaluation_mean_recall':evidence['evaluation_mean_recall'],'quality_basis':'offline empirical mean, not per-query guarantee'}
@@ -98,7 +105,7 @@ class QualityCatalog:
     def from_document(cls,value):
         if value is None:return cls()
         _fields(value,['format_version','profiles'])
-        if type(value['format_version']) is not int or value['format_version']!=1:raise ValueError('Unsupported quality catalog version')
+        if type(value['format_version']) is not int or value['format_version'] not in (1,2):raise ValueError('Unsupported quality catalog version')
         raw=value['profiles']
         if not isinstance(raw,list) or len(raw)>128:raise ValueError('Quality catalog exceeds 128 profiles')
         profiles=[QualityProfile.parse(p) for p in raw]
@@ -107,9 +114,17 @@ class QualityCatalog:
 
     def list(self):return [p.describe() for p in self._profiles.values()]
 
-    def resolve(self,profile_id,key,nlist,row_count,plan,options):
+    def resolve(self,profile_id,key,nlist,row_count,plan,options,execution=None):
         profile=self._profiles.get(profile_id)
         if profile is None:raise QualityUnavailable('quality_profile_missing')
+        backend=dict(profile.execution)
+        if backend.get('device','cpu')!=options.device:raise QualityUnavailable('quality_profile_backend_mismatch')
+        if backend:
+            import faiss
+            if backend['faiss_version']!=faiss.__version__ or (options.device=='gpu' and backend['gpu_model']!=(execution or {}).get('gpu_model')):
+                raise QualityUnavailable('quality_profile_backend_mismatch')
+        if options.device=='gpu' and (profile.budget.nprobe_floor>2048 or profile.budget.initial_candidates>2048):
+            raise QualityUnavailable('quality_profile_gpu_limits')
         if profile.key!=key:raise QualityUnavailable('quality_profile_version_mismatch')
         if (profile.metadata_sql!=plan.metadata_sql or profile.k!=plan.limit or profile.path!=options.path
             or any(not profile.query_min<=x<=profile.query_max for x in plan.query_vector)):
