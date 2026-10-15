@@ -115,6 +115,8 @@ ANN 质量优化四阶段已完成：显式快照绑定配置、质量预算下�
 
 GPU ANN 已按计划接入：SQL SETTINGS逐请求选择CPU/GPU、显式GPU副本、独立worker/预算/设备回退，首期仅GPU search-first。真实GPU校准60组：36通过、21不支持、3留出完整性失败；失败组不导出质量配置，不承诺所有负载纯GPU达标。CPU训练、精确基线和float64重排保持不变。实现与限制见 [GPU说明](docs/gpu-search.md)、[验收记录](docs/validation/gpu-ann.md) 和 [实施计划](docs/superpowers/plans/2026-10-15-gpu-ann.md)。
 
+GPU 后续改进已完成分析、尚未实施：本次补充探测复现完整候选覆盖后空/不足K仍报错，以及异常GPU响应非整数ID被隐式转换的问题；优先G0语义/校验修正、G1热会话与控制面测量/去重、G2有界合批及按证据优化RPC。自动策略、版本持久化与P4合并，GPU覆盖扩展单独做可行性验证。见 [问题分析](docs/design/gpu-improvement-analysis.md) 和 [后续改进计划](docs/superpowers/plans/2026-10-15-gpu-improvements.md)。现有514项回归记录不表示这些新探测问题已经修复。
+
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
 ### 团队协作
@@ -193,6 +195,7 @@ GPU ANN 已按计划接入：SQL SETTINGS逐请求选择CPU/GPU、显式GPU副�
 │   ├── design/p2-grpc.md  # P2 协议、快照与隔离设计
 │   ├── design/interactive-sql-shell.md # P2.5 终端与可写数据库设计
 │   ├── design/p3-faiss-execution.md # P3 索引、两路径与计划展示设计
+│   ├── design/gpu-improvement-analysis.md # GPU不足、补充探测与改进优先级
 │   ├── design/gpu-ann-execution.md # GPU ANN 与 SQL 设备选择设计
 │   ├── design/ann-recall-optimization.md # 低召回原因、校准证据和成本评估
 │   ├── validation/p1-local-baseline.md # P1 验收结果与局限
@@ -206,6 +209,7 @@ GPU ANN 已按计划接入：SQL SETTINGS逐请求选择CPU/GPU、显式GPU副�
 │   ├── superpowers/plans/2026-10-12-p2-grpc.md # P2 执行记录
 │   ├── superpowers/plans/2026-10-12-interactive-sql-shell.md # P2.5 执行计划与完成记录
 │   ├── superpowers/plans/2026-10-13-p3-faiss.md # P3 六任务实施计划
+│   ├── superpowers/plans/2026-10-15-gpu-improvements.md # GPU后续G0—G5计划（未实施）
 │   ├── superpowers/plans/2026-10-15-gpu-ann.md # GPU 六阶段实施记录
 │   ├── superpowers/plans/2026-10-13-ann-recall-optimization.md # 质量校准、配置与优化实施记录
 │   └── research/
