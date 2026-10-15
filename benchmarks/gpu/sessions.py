@@ -14,11 +14,7 @@ from vecstor.rpc.acceptance import ServiceProcess
 costs=runpy.run_path(str(ROOT/'benchmarks/gpu/run.py'))
 helpers=runpy.run_path(str(ROOT/'benchmarks/p3/calibrate.py'))
 DEFAULT_CASES=[(10000,'independent',.1,10),(100000,'independent',.1,10),(100000,'independent',1.,100)]
-VARIANTS={'uncached':(False,[]),'cached':(True,[]),
-          'batch4':(True,['--gpu-batch-size','4','--gpu-batch-wait-ms','1']),
-          'batch8':(True,['--gpu-batch-size','8','--gpu-batch-wait-ms','1']),
-          'fused':(True,['--fused-candidates']),
-          'fused-batch4':(True,['--fused-candidates','--gpu-batch-size','4','--gpu-batch-wait-ms','1'])}
+VARIANTS={'uncached':(False,[]),'cached':(True,[]),'fused':(True,['--fused-candidates'])}
 
 
 def intervals(records):

@@ -24,6 +24,7 @@ message SearchOptions {
   string device = 9;
   optional uint32 gpu_id = 10;
   string device_fallback = 11;
+  string candidate_data_path = 12;
 }
 message QueryExecutionPlan { string json_payload = 1; }
 message SQLRequest { string database_id = 1; string sql = 2; string operation_id = 3; SearchOptions search_options = 4; }
@@ -102,6 +103,15 @@ message CandidateResult {
   repeated int64 checked_ids = 4;
   repeated vecstor.v1.Row rows = 5;
 }
+message FilteredVectorResult {
+  string token = 1;
+  uint64 revision = 2;
+  uint64 checked_count = 3;
+  repeated int64 checked_ids = 4;
+  repeated vecstor.v1.Row rows = 5;
+  uint32 dimension = 6;
+  bytes vectors_f32_le = 7;
+}
 message BuildIndexRequest {
   string database_id = 1;
   string table = 2;
@@ -120,6 +130,7 @@ service SQLStorage {
   rpc FetchVectors(FetchRequest) returns (VectorBatch);
   rpc StreamVectorSnapshot(SnapshotRequest) returns (stream SnapshotBatch);
   rpc FilterCandidates(CandidateRequest) returns (CandidateResult);
+  rpc FilterCandidateVectors(CandidateRequest) returns (FilteredVectorResult);
 }
 service SQLCompute {
   rpc Control(ControlRequest) returns (ControlResponse);

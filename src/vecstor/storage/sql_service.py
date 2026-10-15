@@ -61,7 +61,9 @@ class SQLStorageService(rpc.SQLStorageServicer):
     def Control(self, request, context):
         timeout = _remaining(context)
         try:
-            if request.action == 'list_databases':
+            if request.action == 'capabilities':
+                result={'fused_candidate_vectors':True}
+            elif request.action == 'list_databases':
                 result = self.catalog.list_databases()
             elif request.action == 'open_database':
                 result = self.catalog.open_database(request.name, request.create)
@@ -211,6 +213,26 @@ class SQLStorageService(rpc.SQLStorageServicer):
             _abort(context,error)
         finally:
             self._stream_slots.release()
+
+    def FilterCandidateVectors(self,request,context):
+        if not self._stream_slots.acquire(blocking=False):
+            context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,'At most four active filtering/stream requests are allowed')
+        try:
+            lease=self._lease(request.database_id,request.token)
+            if len(request.ids)>MAX_BATCH_ROWS or len(request.ids)*lease['dimension']*4>VECTOR_PAYLOAD_BYTES:
+                context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,'Fused vector batch exceeds transfer limit')
+            rows=self.catalog.filter_candidate_vectors(request.database_id,request.token,request.sql,request.ids,
+                timeout=_remaining(context),cancelled=lambda:not context.is_active())
+            _remaining(context)
+            vectors=np.asarray([r[4] for r in rows],dtype='<f4').reshape(len(rows),lease['dimension'])
+            response=pb.FilteredVectorResult(token=request.token,revision=lease['revision'],checked_count=len(request.ids),checked_ids=request.ids,
+                rows=[v1.Row(id=r[0],category=r[1],timestamp=r[2],value=r[3]) for r in rows],dimension=lease['dimension'],vectors_f32_le=vectors.tobytes())
+            _remaining(context)
+            if response.ByteSize()>MAX_MESSAGE_BYTES:
+                context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,'fused_response_too_large')
+            return response
+        except (ValueError,OSError,TimeoutError) as error:_abort(context,error)
+        finally:self._stream_slots.release()
 
 
 def create_catalog_server(root, address, candidate_binding="text",candidate_plan_cache=True):

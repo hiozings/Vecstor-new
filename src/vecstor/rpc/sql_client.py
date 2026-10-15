@@ -154,13 +154,15 @@ class SessionClient:
         effective=resolve_execution_options(self.search_options,plan.settings) if plan.kind=='vector' else self.search_options
         needs_device_ack=bool(plan.settings) or effective.device=='gpu'
         if plan.kind == 'vector':
-            caps=self._query_capabilities() if needs_device_ack or effective.quality_profile_id else None
+            caps=self._query_capabilities() if needs_device_ack or effective.quality_profile_id or effective.candidate_data_path!='default' else None
             if needs_device_ack and (type(caps.get('execution_settings_version')) is not int or caps['execution_settings_version']<1):
                 self._invalidate_query_capabilities()
                 raise ValueError('Compute service does not support SQL device settings')
             if effective.quality_profile_id and not isinstance(caps.get('quality_profiles'),list):
                 self._invalidate_query_capabilities()
                 raise ValueError('Compute service does not support quality profiles')
+            if effective.candidate_data_path!='default' and effective.candidate_data_path not in caps.get('candidate_data_paths',[]):
+                self._invalidate_query_capabilities();raise ValueError('Compute service does not support requested candidate data path')
             request.search_options.CopyFrom(effective.to_proto())
             self.last_search_mode = effective.mode
         client_stats={'preflight_ms':(time.perf_counter()-preflight_started)*1000,
@@ -190,6 +192,11 @@ class SessionClient:
                                 raise ValueError('Compute service did not acknowledge requested device')
                             if effective.device=='gpu' and effective.device_fallback=='error' and execution.get('actual_device')=='cpu':
                                 raise ValueError('Compute service silently changed requested GPU device')
+                        if effective.candidate_data_path!='default':
+                            execution=event.get('execution_plan') or {}
+                            accepted_paths=('fused','mixed') if effective.candidate_data_path=='fused' else ('separate',)
+                            if execution.get('requested_candidate_data_path')!=effective.candidate_data_path or (execution.get('actual_mode')=='approx' and execution.get('candidate_data_path') not in accepted_paths):
+                                raise ValueError('Compute service did not acknowledge candidate data path')
                         profile_id=request.search_options.quality_profile_id
                         if profile_id:
                             execution=event.get('execution_plan') or {}

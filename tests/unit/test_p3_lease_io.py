@@ -58,3 +58,14 @@ def test_expired_or_cancelled_query_cannot_start_fallback_rpc():
     io.context=SimpleNamespace(is_active=lambda:False)
     with pytest.raises(RemoteError) as error:io.remaining()
     assert error.value.code==grpc.StatusCode.CANCELLED
+
+
+@pytest.mark.parametrize('change',[{'revision':4},{'checked_ids':[2,1]},{'dimension':3},{'vectors_f32_le':b'bad'},
+                                  {'vectors_f32_le':np.full((1,2),np.nan,dtype='<f4').tobytes()}])
+def test_corrupt_fused_reply_is_data_loss(change):
+    from vecstor.rpc.services_pb2 import Row
+    io=exporter([]);io.stub=SimpleNamespace(FilterCandidateVectors=None)
+    fields=dict(token='token',revision=3,checked_count=2,checked_ids=[1,2],rows=[Row(id=1,category='a',timestamp=0,value=1)],dimension=2,vectors_f32_le=np.zeros((1,2),dtype='<f4').tobytes())
+    fields.update(change);io.call=lambda *a:pb.FilteredVectorResult(**fields)
+    with pytest.raises(RemoteError) as error:io.filter_fetch('query',[1,2])
+    assert error.value.code==grpc.StatusCode.DATA_LOSS

@@ -21,7 +21,7 @@ class LeaseIO:
         self.lease=None
         trace.setdefault('counts',{})
         for name in ['rpc_calls','rpc_payload_bytes','scan_metadata_calls','filter_candidate_calls','snapshot_calls',
-                     'metadata_rows_returned','candidates_checked','vectors_fetched']:
+                     'metadata_rows_returned','candidates_checked','vectors_fetched','filter_candidate_vectors_calls','fused_size_splits','fused_single_row_fallbacks']:
             trace['counts'].setdefault(name,0)
         trace.setdefault('rpc_wait_ms',0.0)
 
@@ -131,6 +131,33 @@ class LeaseIO:
         consistent(len(set(found))==len(found) and set(found).issubset(ids),'Unexpected candidate ID')
         self.trace['counts']['metadata_rows_returned']+=len(rows)
         return rows
+
+    def filter_fetch(self,sql,ids):
+        if not ids:return [],np.empty((0,self.lease.dimension),dtype=np.float32)
+        self.remaining()
+        self.trace['counts']['filter_candidate_vectors_calls']+=1
+        request=pb.CandidateRequest(database_id=self.database_id,token=self.lease.token,sql=sql,ids=ids)
+        try:reply=self.call(self.stub.FilterCandidateVectors,request)
+        except grpc.RpcError as error:
+            if error.code()!=grpc.StatusCode.RESOURCE_EXHAUSTED or error.details()!='fused_response_too_large':raise
+            if len(ids)==1:
+                self.trace['counts']['fused_single_row_fallbacks']+=1
+                self.trace['candidate_data_path']='mixed'
+                rows=self.filter(sql,ids);return rows,self.fetch([r['id'] for r in rows])
+            self.trace['counts']['fused_size_splits']+=1
+            middle=len(ids)//2
+            left,lv=self.filter_fetch(sql,ids[:middle]);right,rv=self.filter_fetch(sql,ids[middle:])
+            return left+right,np.concatenate((lv,rv),axis=0)
+        self._version(reply)
+        consistent(reply.checked_count==len(ids) and list(reply.checked_ids)==ids,'Candidate coverage mismatch')
+        rows=[self.row(row) for row in reply.rows];found=[r['id'] for r in rows];found_set=set(found)
+        consistent(len(found)==len(found_set) and found_set.issubset(ids) and found==[i for i in ids if i in found_set],'Unexpected fused candidate order/ID')
+        consistent(reply.dimension==self.lease.dimension and len(reply.vectors_f32_le)==len(rows)*self.lease.dimension*4
+                   and len(reply.vectors_f32_le)<=VECTOR_PAYLOAD_BYTES,'Fused vector payload mismatch')
+        vectors=np.frombuffer(reply.vectors_f32_le,dtype='<f4').reshape(len(rows),self.lease.dimension)
+        consistent(np.isfinite(vectors).all(),'Nonfinite fused vectors')
+        self.trace['counts']['metadata_rows_returned']+=len(rows);self.trace['counts']['vectors_fetched']+=len(rows)
+        return rows,vectors
 
     def snapshot(self):
         consistent(self.lease.HasField('row_count'),'Snapshot export requires row count')

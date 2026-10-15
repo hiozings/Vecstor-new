@@ -11,6 +11,7 @@ def validate_profile_id(value):
 
 @dataclass(frozen=True)
 class SearchOptions:
+    candidate_data_path: str = 'default'
     device: str = 'cpu'
     gpu_id: int = 0
     device_fallback: str = 'error'
@@ -24,6 +25,9 @@ class SearchOptions:
     quality_profile_id: str | None = None
 
     def validate(self):
+        if self.candidate_data_path not in ('default','separate','fused'):raise ValueError('Invalid candidate_data_path')
+        if self.candidate_data_path=='fused' and (self.mode!='approx' or self.path!='search-first'):
+            raise ValueError('Fused candidate reads require approx/search-first')
         if self.device not in ('cpu','gpu'):raise ValueError('device must be cpu or gpu')
         if type(self.gpu_id) is not int or self.gpu_id!=0:raise ValueError('Only gpu_id=0 is supported')
         if self.device_fallback not in ('error','cpu'):raise ValueError('device_fallback must be error or cpu')
@@ -50,7 +54,7 @@ class SearchOptions:
 
     @classmethod
     def from_proto(cls, value):
-        options = {name: getattr(value, name) for name in ('mode', 'path', 'fallback', 'quality_profile_id', 'device', 'device_fallback') if getattr(value, name)}
+        options = {name: getattr(value, name) for name in ('mode', 'path', 'fallback', 'quality_profile_id', 'device', 'device_fallback', 'candidate_data_path') if getattr(value, name)}
         options.update({name: getattr(value, name) for name in ('nprobe', 'candidates', 'max_candidates', 'max_rounds') if value.HasField(name)})
         if value.HasField('gpu_id'):options['gpu_id']=value.gpu_id
         return cls(**options).validate()

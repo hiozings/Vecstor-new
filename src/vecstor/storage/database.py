@@ -282,11 +282,15 @@ class Database:
         return connection.execute(f"SELECT id, vector FROM {identifier(lease['table'])} WHERE id > ? ORDER BY id LIMIT ?",
                                   [after_id, limit]).fetchall()
 
-    def _filter_candidates(self, token, sql, ids):
+    def _filter_candidate_vectors(self,token,sql,ids):
+        return self._filter_candidates(token,sql,ids,include_vectors=True)
+
+    def _filter_candidates(self, token, sql, ids, include_vectors=False):
         connection, _, lease = self._lease(token)
         if len(ids) > 1024 or len(set(ids)) != len(ids) or any(isinstance(i,bool) or not isinstance(i,int) or not 0 <= i < 2**63 for i in ids):
             raise ValueError("Candidate IDs must be distinct nonnegative int64 values, at most 1024")
-        marker=len(ids) if self.candidate_binding=='legacy' else None
+        if include_vectors and len(ids)*lease['dimension']*4>1024*1024:raise ValueError('Vector batch exceeds transfer limit')
+        marker=(len(ids) if self.candidate_binding=='legacy' else None,include_vectors)
         cached=self._candidate_plans.get(token) if self.candidate_plan_cache else None
         self._check_time()
         if cached is not None and cached[:2]==(sql,marker):
@@ -299,7 +303,9 @@ class Database:
             restriction=(sqlglot.parse_one('"id" IN (SELECT unnest(CAST(? AS BIGINT[])))',read='duckdb')
                          if self.candidate_binding=='text' else
                          exp.In(this=exp.column('id',quoted=True),expressions=[exp.Placeholder() for _ in ids]))
-            statement_sql=sqlglot.parse_one(plan.vector.metadata_sql,read="duckdb").where(restriction).sql(dialect="duckdb")
+            statement=sqlglot.parse_one(plan.vector.metadata_sql,read="duckdb").where(restriction)
+            if include_vectors:statement=statement.select(exp.column('vector',quoted=True),append=True)
+            statement_sql=statement.sql(dialect="duckdb")
             self._check_time()
             # At most one bounded immutable plan per live lease; never cache data.
             if self.candidate_plan_cache and max(len(sql.encode()),len(statement_sql.encode()))<=65536:

@@ -100,6 +100,9 @@ class DatabaseCatalog:
     def filter_candidates(self,database_id,token,sql,ids,timeout=15,cancelled=None):
         return self.database(database_id).call("filter_candidates",token,sql,list(ids),timeout=timeout,cancelled=cancelled)
 
+    def filter_candidate_vectors(self,database_id,token,sql,ids,timeout=15,cancelled=None):
+        return self.database(database_id).call('filter_candidate_vectors',token,sql,list(ids),timeout=timeout,cancelled=cancelled)
+
     def close(self):
         self.stopping.set(); self.janitor.join()
         with self.lock:

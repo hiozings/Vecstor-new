@@ -32,12 +32,14 @@ class TopK:
         self.trace['rerank_ms']+=(time.monotonic()-started)*1000
 
 
-def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None):
+def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None,fused_candidates=False):
     started=time.monotonic()
     trace={'plan_version':1,'requested_mode':options.mode,'requested_path':options.path,
            'requested_device':options.device,'actual_device':'cpu','device_fallback_reason':None,'device_attempts':[],
            'gpu_kernel_ms':None,'gpu_h2d_ms':None,'gpu_d2h_ms':None,
            'actual_mode':None,'actual_path':None,'metric':'squared_l2','rerank_precision':'float64',
+           'requested_candidate_data_path':options.candidate_data_path,
+           'candidate_data_path':'fused' if fused_candidates and options.path=='search-first' else 'separate',
            'requested_k':plan.limit,'options':options.to_dict(),'rounds':[], 'index':None,
            'fallback_reason':None,'candidate_space_complete':False,'exhaustive_buckets':False,'selector_full_coverage':False,
            'selector_build_ms':0.,'native_search_ms':0.,'faiss_search_ms':0.0,'rerank_ms':0.0,
@@ -99,7 +101,7 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                 def exact(fallback=None,known=None):
                     nonlocal top
                     if device=='gpu':device_failure('gpu_exact_fallback_'+str(fallback))
-                    trace.update(actual_device='cpu',actual_mode='exact',actual_path='filter-first',fallback_reason=fallback)
+                    trace.update(candidate_data_path='separate',actual_device='cpu',actual_mode='exact',actual_path='filter-first',fallback_reason=fallback)
                     top=TopK(plan.limit,query,trace)
                     batches=io.scan(request.sql) if known is None else (known[i:i+io.batch_size] for i in range(0,len(known),io.batch_size))
                     matched=0
@@ -174,9 +176,12 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                             seen.update(new);passed=0
                             for start in range(0,len(new),io.batch_size):
                                 ids=new[start:start+io.batch_size]
-                                rows=io.filter(request.sql,ids) if allowed_map is None else [allowed_map[i] for i in ids]
-                                passed+=len(rows)
-                                top.add(rows,io.fetch([row['id'] for row in rows]))
+                                if allowed_map is None and fused_candidates:
+                                    rows,vectors=io.filter_fetch(request.sql,ids)
+                                else:
+                                    rows=io.filter(request.sql,ids) if allowed_map is None else [allowed_map[i] for i in ids]
+                                    vectors=io.fetch([row['id'] for row in rows])
+                                passed+=len(rows);top.add(rows,vectors)
                             matched+=passed
                             trace['counts']['candidates_checked']=len(seen)
                             trace['rounds'].append({'round':round_number,'L':length,'nprobe':nprobe,'new_candidates':len(new),

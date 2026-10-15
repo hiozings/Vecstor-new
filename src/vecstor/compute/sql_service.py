@@ -19,12 +19,19 @@ from vecstor.rpc.sql_codec import encode_result
 
 
 class SQLComputeService(rpc.SQLComputeServicer):
-    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None):
+    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None,fused_candidates=False):
         self.server_instance_id=uuid.uuid4().hex
         self.quality_catalog=QualityCatalog.from_document(quality_document)
         self.channel = grpc.insecure_channel(address, options=OPTIONS)
         self.stub = rpc.SQLStorageStub(self.channel)
         self.timeout = timeout
+        self.fused_candidates=fused_candidates
+        if fused_candidates:
+            try:
+                capabilities=json.loads(self.stub.Control(pb.ControlRequest(action='capabilities'),timeout=min(timeout,5)).json_result)
+                if not isinstance(capabilities,dict) or capabilities.get('fused_candidate_vectors') is not True:raise ValueError('Missing fused capability')
+            except (grpc.RpcError,ValueError,TypeError) as error:
+                self.channel.close();raise ValueError('Storage does not support fused candidate reads') from error
         self.index_manager=IndexManager(self.stub,max_bytes=index_memory_mib*1024*1024,max_entries=index_max_entries,gpu_options=gpu_options)
 
     def close(self):
@@ -64,10 +71,13 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 yield from encode_result(output)
             elif plan.vector is not None:
                 options=resolve_execution_options(SearchOptions.from_proto(request.search_options),plan.settings)
+                if options.candidate_data_path=='fused' and not self.fused_candidates:
+                    raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'Fused candidate reads are not enabled')
+                use_fused=self.fused_candidates and options.candidate_data_path!='separate'
                 normalized=pb.SQLRequest.FromString(request.SerializeToString())
                 normalized.sql=plan.sql
                 output=execute_vector(self.stub,self.index_manager.registry,normalized,plan.vector,options,
-                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry)
+                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry,fused_candidates=use_fused)
                 output['execution_plan']['server_instance_id']=self.server_instance_id
                 output['execution_plan']['server_admission_ms']=getattr(context,'vecstor_admission_ms',None)
                 if plan.explain:output['rows']=[[json.dumps(output['execution_plan'],ensure_ascii=False,allow_nan=False)]]
@@ -94,7 +104,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
             if stream is not None: stream.cancel()
 
     def GetSearchCapabilities(self,request,context):
-        return pb.ControlResponse(json_result=json.dumps({'server_instance_id':self.server_instance_id,'ann':True,'algorithm':'cpu_ivfflat',
+        return pb.ControlResponse(json_result=json.dumps({'server_instance_id':self.server_instance_id,'fused_candidates':self.fused_candidates,'candidate_data_paths':['separate','fused'] if self.fused_candidates else ['separate'],'ann':True,'algorithm':'cpu_ivfflat',
             'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':True,'gpu_paths':['search-first'],'gpu_max_search_k':2048,'gpu_max_nprobe':2048,
             'execution_settings_version':1,'index_devices_version':1,'quality_profiles':self.quality_catalog.list()}))
 
