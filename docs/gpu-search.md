@@ -82,3 +82,32 @@ python benchmarks/gpu/calibrate.py --output-dir results/my-gpu-calibration
 GPU构建和定向清理同样需要服务声明支持设备控制并确认响应设备；旧服务不能忽略device后把CPU构建报告成GPU成功，也不能因忽略设备参数误清CPU索引。
 
 完整校准后可用 `python benchmarks/gpu/run.py --calibration-dir results/my-gpu-calibration --output-dir results/my-gpu-rpc` 做真实RPC校验并导出 `quality-profiles.json`。该工具针对校准生成的合成负载和新建验收库；不支持把这些配置直接用于任意已有用户库。自有数据需要独立校准并绑定自己的实际快照。流程、产物及短实验限制见 [GPU实验入口](../benchmarks/gpu/README.md)。
+
+## 热会话与候选合并读取（G1/G2）
+
+终端会话与复用的 `SessionClient` 会缓存只读查询能力，热查询不再逐次获取能力列表。构建/清理仍进行新鲜能力确认；每条向量查询仍校验完成帧的设备、质量配置和显式数据路径。普通 SQL/CRUD 不受会话向量选项影响。服务身份变化、错误或不支持响应会失效缓存。实验可用 `SessionClient(..., cache_query_capabilities=False)` 关闭缓存作对照。
+
+先检索可以将候选过滤和合法向量读取合并为一个存储 RPC。默认关闭；存储服务必须支持新增协议，再在计算服务启动参数中加：
+
+```bash
+vecstor serve compute --storage 127.0.0.1:50051 --fused-candidates
+```
+
+该开关启用后，CPU/GPU ANN 先检索默认采用合并读取。可逐语句指定路径：
+
+```sql
+SELECT id FROM items
+ORDER BY vector_distance(vector, [0,0,0]) LIMIT 10
+SETTINGS device='gpu', mode='approx', path='search-first',
+         candidate_data_path='fused';
+```
+
+`candidate_data_path='separate'` 使用原过滤后取向量路径；`default` 跟随服务设置。未开启服务开关时显式 `fused` 会拒绝，旧存储服务也不能静默忽略新请求。先过滤/精确查询不能显式选择 fused。该优化没有改变 ANN 参数、读租约、revision 校验或重排语义。
+
+合并结果仍受每批1024个ID、1 MiB向量和4 MiB消息上限约束。超大元数据响应会拆分；单行仍过大时改用原两步读取，计划显示 `mixed` 并记录拆分/回退次数。这里仅改变数据传输方式，不表示设备回退或更换数据版本。计划中的 requested_candidate_data_path、candidate_data_path 和 counts 展示实际路径。
+
+客户端计划 `client` 区分能力控制RPC与 ExecuteSQL；服务 `server_admission_ms` 包括接入调度和反序列化，不能当作纯线程排队。`gpu_queue_ms` 和 `gpu_ipc_ms` 分开报告等待及父子进程开销；后者为roundtrip扣除native调用的估计，仍不是独立CUDA事件计时。
+
+完整覆盖全部候选空间时，严格GPU查询可直接返回全部合法记录（包括0条及不足K），计划显示 candidate_space_complete 和 candidate_space_exhausted；单有 nprobe=nlist 不能证明完整覆盖。队列满时明确拒绝，不因复用检查重置健康GPU副本。
+
+当前合并读取对不同负载可能提速或退化，应按自己的负载对照后启用。原生batch 1/4/8实验已完成，但本轮未上线运行时合批；主动取消仍可能回收整个GPU worker。证据、测量口径与后续范围见 [G0—G2验收](validation/gpu-improvements.md)。

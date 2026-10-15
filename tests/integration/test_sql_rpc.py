@@ -103,3 +103,18 @@ def test_client_rejects_result_rows_with_wrong_width(cells):
             with pytest.raises(ValueError,match="width"):
                 c.execute("SELECT id FROM items")
     finally: server.stop(0).wait()
+
+
+def test_ordinary_crud_with_gpu_fused_session_settings(tmp_path):
+    from vecstor.query.search_options import SearchOptions
+    from vecstor.rpc.sql_client import SessionClient
+    with servers(tmp_path) as (address,_),SessionClient(address) as c:
+        c.open_database('demo',True)
+        c.search_options=SearchOptions(mode='approx',path='search-first',device='gpu',candidate_data_path='fused')
+        c.execute('CREATE TABLE ordinary (id BIGINT, value BIGINT)')
+        assert c.execute('INSERT INTO ordinary VALUES (1,2)','insert-once')['affected_rows']==1
+        assert c.get_operation_status('insert-once')['status']=='COMMITTED'
+        assert c.execute('SELECT * FROM ordinary')['rows']==[[1,2]]
+        assert c.execute('UPDATE ordinary SET value=3 WHERE id=1')['affected_rows']==1
+        assert c.execute('DELETE FROM ordinary WHERE id=1')['affected_rows']==1
+        assert c.execute('SELECT COUNT(*) FROM ordinary')['rows']==[[0]]

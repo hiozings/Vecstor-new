@@ -379,3 +379,5 @@ SETTINGS device='gpu', mode='approx', path='search-first';
 ```
 
 SETTINGS 仅覆盖当前语句，改为device='cpu'可切换CPU。GPU不能用于exact或filter-first。默认GPU不可用时明确失败；需允许转CPU才增加 `device_fallback='cpu'`，然后核对结果的实际设备/模式。候选上限2048可能使低通过率查询失败；CPU v1质量配置不能当作GPU证据。完整参数、索引重建、显存和隔离限制见 [GPU使用说明](gpu-search.md)。
+
+GPU改进版自动复用终端会话的查询能力信息；普通SQL和CRUD仍按原语义执行。可选的候选合并读取需启动计算服务时加 `--fused-candidates`，再用向量SQL的 `SETTINGS candidate_data_path='fused'|'separate'` 对照。默认关闭，部分负载会退化；具体配置和计划字段见 [热会话与候选合并读取](gpu-search.md#热会话与候选合并读取g1g2)。

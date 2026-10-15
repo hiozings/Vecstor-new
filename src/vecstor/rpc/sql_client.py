@@ -152,7 +152,8 @@ class SessionClient:
         self.last_operation_id=operation_id or str(uuid.uuid4())
         request=pb.SQLRequest(database_id=self.database_id,sql=sql,operation_id=self.last_operation_id)
         effective=resolve_execution_options(self.search_options,plan.settings) if plan.kind=='vector' else self.search_options
-        needs_device_ack=bool(plan.settings) or effective.device=='gpu'
+        needs_device_ack=plan.kind=='vector' and (bool(plan.settings) or effective.device=='gpu')
+        needs_data_ack=plan.kind=='vector' and effective.candidate_data_path!='default'
         if plan.kind == 'vector':
             caps=self._query_capabilities() if needs_device_ack or effective.quality_profile_id or effective.candidate_data_path!='default' else None
             if needs_device_ack and (type(caps.get('execution_settings_version')) is not int or caps['execution_settings_version']<1):
@@ -192,7 +193,7 @@ class SessionClient:
                                 raise ValueError('Compute service did not acknowledge requested device')
                             if effective.device=='gpu' and effective.device_fallback=='error' and execution.get('actual_device')=='cpu':
                                 raise ValueError('Compute service silently changed requested GPU device')
-                        if effective.candidate_data_path!='default':
+                        if needs_data_ack:
                             execution=event.get('execution_plan') or {}
                             accepted_paths=('fused','mixed') if effective.candidate_data_path=='fused' else ('separate',)
                             if execution.get('requested_candidate_data_path')!=effective.candidate_data_path or (execution.get('actual_mode')=='approx' and execution.get('candidate_data_path') not in accepted_paths):

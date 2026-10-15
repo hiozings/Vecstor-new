@@ -62,7 +62,7 @@
 | gRPC / Protobuf | 查询、目录、类型化 SQL 结果与读租约 | grpcio/grpcio-tools 1.83.1、protobuf 7.35.1；兼容 P2 v1 并新增 P2.5 v2；索引分发待实现 |
 | prompt_toolkit / Rich | 多行终端、历史/补全与表格 | 3.0.53 / 15.0.0，已通过 Conda 安装并锁定 |
 | Arrow Flight | 批量列式数据传输 | 可选，只有测出传输瓶颈后再评估 |
-| pytest | 正确性、接口与集成测试 | 9.1.1；514 项 P1/P2/P2.5/P3/质量优化/GPU测试通过，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
+| pytest | 正确性、接口与集成测试 | 9.1.1；565 项 P1/P2/P2.5/P3/质量优化/GPU与G0—G2测试通过，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
 | 容器与部署脚本 | 隔离部署、复现实验 | 随原型补充，不先引入复杂集群平台 |
 
 安装状态与业务集成状态必须分开记录。通过 Conda 管理依赖，不混用 uv/pip 覆盖 Conda 管理的 Faiss、NumPy 和 CUDA 库。`environment.yml` 固定直接依赖，`environments/vecstor-linux-64.explicit.txt` 固定全部 Conda 包的构建和 MD5。保留 CPU 后端，GPU 计算使用本机已有设备。
@@ -115,7 +115,7 @@ ANN 质量优化四阶段已完成：显式快照绑定配置、质量预算下�
 
 GPU ANN 已按计划接入：SQL SETTINGS逐请求选择CPU/GPU、显式GPU副本、独立worker/预算/设备回退，首期仅GPU search-first。真实GPU校准60组：36通过、21不支持、3留出完整性失败；失败组不导出质量配置，不承诺所有负载纯GPU达标。CPU训练、精确基线和float64重排保持不变。实现与限制见 [GPU说明](docs/gpu-search.md)、[验收记录](docs/validation/gpu-ann.md) 和 [实施计划](docs/superpowers/plans/2026-10-15-gpu-ann.md)。
 
-GPU 后续改进已完成分析、尚未实施：本次补充探测复现完整候选覆盖后空/不足K仍报错，以及异常GPU响应非整数ID被隐式转换的问题；优先G0语义/校验修正、G1热会话与控制面测量/去重、G2有界合批及按证据优化RPC。自动策略、版本持久化与P4合并，GPU覆盖扩展单独做可行性验证。见 [问题分析](docs/design/gpu-improvement-analysis.md) 和 [后续改进计划](docs/superpowers/plans/2026-10-15-gpu-improvements.md)。现有514项回归记录不表示这些新探测问题已经修复。
+GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复用查询能力并拆分计时，提供可选候选过滤/向量合并RPC（默认关闭、SQL可覆盖）。原生batch1/4/8探测完成；native占比低且GPU排队短，本轮不部署运行时批调度、批内取消或二进制IPC。自动策略/持久版本/GPU覆盖扩展仍分别留给G3—G5/P4。见 [改进验收](docs/validation/gpu-improvements.md)、[问题分析](docs/design/gpu-improvement-analysis.md) 和 [执行计划](docs/superpowers/plans/2026-10-15-gpu-improvements.md)。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -164,7 +164,7 @@ GPU 后续改进已完成分析、尚未实施：本次补充探测复现完整�
 │   ├── storage/          # service.py 兼容 P2；catalog/database/sql_service 管理持久库、事务、租约
 │   ├── compute/          # P2 RemoteEngine、v2 路由、lease_io/index_manager/vector_execution
 │   ├── index/            # GPU worker/副本管理及CPU IVF 后端、快照键、带引用的有界 registry、可取消构建进程
-│   ├── rpc/              # v1/v2 协议、会话客户端、类型化结果、生命周期和验收
+│   ├── rpc/              # v1/v2 协议、能力缓存会话客户端、timing接入计时、类型化结果、生命周期和验收
 │   ├── shell/            # app/buffer/commands/render/completion：交互界面及分句
 │   └── query/
 │       ├── __init__.py
@@ -179,7 +179,7 @@ GPU 后续改进已完成分析、尚未实施：本次补充探测复现完整�
 │   ├── costs.py          # 训练参数探索、RPC 并发与绑定/缓存成本消融
 │   ├── calibrate.py      # 独立校准/留出、带簇负载、冻结配置与恢复运行
 │   └── validate_quality.py # 冻结参数 RPC 对照及实际快照绑定
-├── benchmarks/gpu/       # GPU独立校准、质量配置导出及CPU/GPU RPC成本对照
+├── benchmarks/gpu/       # calibrate/run质量校准与RPC；sessions热会话/合并RPC对照；batch_probe原生批探测
 ├── configs/quality/       # 质量配置示例，绑定实际快照而非通用默认参数
 ├── tests/
 │   ├── unit/             # 数据、SQL、持久事务、协议、终端输入与 PTY 测试
@@ -204,12 +204,13 @@ GPU 后续改进已完成分析、尚未实施：本次补充探测复现完整�
 │   ├── validation/ann-recall-optimization.md # 正式质量、成本、资源及隔离证据
 │   ├── validation/gpu-ann-capabilities.md # GPU原生能力边界
 │   ├── validation/gpu-ann.md # GPU质量/隔离/成本/限制
+│   ├── validation/gpu-improvements.md # G0—G2边界/热会话/合并RPC/原生批验证
 │   ├── validation/p3-faiss.md # P3 CPU 回归、隔离、召回实验与已知限制
 │   ├── superpowers/plans/2026-10-11-local-baseline.md # 执行计划与记录
 │   ├── superpowers/plans/2026-10-12-p2-grpc.md # P2 执行记录
 │   ├── superpowers/plans/2026-10-12-interactive-sql-shell.md # P2.5 执行计划与完成记录
 │   ├── superpowers/plans/2026-10-13-p3-faiss.md # P3 六任务实施计划
-│   ├── superpowers/plans/2026-10-15-gpu-improvements.md # GPU后续G0—G5计划（未实施）
+│   ├── superpowers/plans/2026-10-15-gpu-improvements.md # GPU G0—G2实施记录与G3—G5待办
 │   ├── superpowers/plans/2026-10-15-gpu-ann.md # GPU 六阶段实施记录
 │   ├── superpowers/plans/2026-10-13-ann-recall-optimization.md # 质量校准、配置与优化实施记录
 │   └── research/
@@ -335,3 +336,12 @@ src/vecstor/
 - v1质量配置只用于CPU；GPU v2还绑定float32、Faiss版本、机型及独立证据。校准/评估失败组不发布，不用CPU回退充当GPU质量。
 - GPU隔离允许CUDA所需procfs读及既有伪文件写/截断、CPU拓扑和指定字符设备；存储目录/文件仍须在计算进程和GPU worker内实际验证读拒绝。不是恶意同用户进程通用沙箱。
 - 真实GPU验收 `python scripts/check_gpu.py --output-dir results/gpu-check`；GPU强制测试 `VECSTOR_REQUIRE_GPU=1 python -m pytest -q`。无GPU环境专属测试明确skip，不能当作GPU成功。实验见 `benchmarks/gpu/`。
+
+
+### G0—G2新增约束
+
+- 完整候选覆盖须有同快照唯一ID验证；nprobe=nlist本身不是完整性证明。损坏GPU ID/帧/统计值在转换前拒绝，不得借设备回退掩盖。
+- 只读查询能力按会话/服务实例缓存；完成帧仍确认设备/质量/显式数据路径。构建/清理实时确认；普通SQL/CRUD不要求向量执行计划确认。GPU复用遇队列满等准入拒绝不得重置健康worker。
+- FilterCandidateVectors保持同租约/版本、输入ID存在性及顺序验证，共用4扫描名额，最多1024行/1MiB向量/4MiB消息。仅特定响应超大错误可拆分或单行退回两步读取，并记录mixed路径；其他错误直接传播。
+- 合并读取默认关闭，计算端显式--fused-candidates且存储能力确认后启用；SQL candidate_data_path=default|separate|fused，fused仅approx/search-first。优化不得改变候选预算、质量配置或设备策略。
+- 性能对照固定参数/查询、复用每工作线程会话，控制面RPC和存储RPC分开。未测CUDA事件时kernel/H2D/D2H为null；原生批摊销不能代替端到端结果，退化必须报告。

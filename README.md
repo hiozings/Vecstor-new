@@ -133,3 +133,5 @@ SETTINGS device='gpu', mode='approx', path='search-first';
 ```
 
 默认仍为CPU精确查询。GPU仅支持先检索、每轮候选/nprobe最多2048；默认不静默回退CPU。写入/计算重启/worker失效后需显式重建。使用方式、质量与资源边界见 [GPU说明](docs/gpu-search.md)；[GPU验收](docs/validation/gpu-ann.md) 保留不支持及完整性失败组，不宣称所有负载都达标或加速。
+
+G0—G2已补强GPU候选完整性和响应校验，减少热会话能力查询，并新增可选 `--fused-candidates` 合并读取及SQL `candidate_data_path` 覆盖。默认关闭合并读取；运行时合批尚未上线。使用方法见 [GPU说明](docs/gpu-search.md)，性能与局限见 [改进验收](docs/validation/gpu-improvements.md)。

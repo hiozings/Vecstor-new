@@ -50,9 +50,14 @@ class IndexManager:
                         if any(actual.get(name)!=getattr(resident.handle,name) for name in ('row_count','dimension','nlist')):
                             raise GpuDataError('GPU replica metadata mismatch')
                         return dict(resident.describe(),state='ready',reused=True)
-                    except GpuError:
-                        # Explicit build may recover a dead/missing native replica.
-                        self.gpu_worker.reset()
+                    except GpuError as error:
+                        # Admission rejection does not imply a broken replica.
+                        reason=str(error)
+                        if reason not in ('gpu_replica_missing','gpu_worker_generation_changed') and not reason.startswith('gpu_worker_failed: '):
+                            raise
+                        # The dispatcher may already have retired this generation.
+                        if self.gpu_worker.generation==resident.handle.worker_generation:
+                            self.gpu_worker.reset()
 
                 self.gpu_registry.reserve(cpu.handle.byte_size)
                 token=uuid.uuid4().hex;generation=self.gpu_worker.generation

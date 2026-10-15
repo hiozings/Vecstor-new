@@ -168,3 +168,25 @@ def test_gpu_reuse_verifies_native_replica_when_liveness_metadata_is_stale(tmp_p
         rebuilt=c.build_index('items',nlist=1,device='gpu')
         assert not rebuilt['reused'] and rebuilt['worker_pid']!=first['worker_pid']
         assert c.execute(SQL+GPU)['execution_plan']['actual_device']=='gpu'
+
+
+def test_busy_reuse_does_not_reset_other_gpu_replicas(tmp_path,monkeypatch):
+    from vecstor.index.gpu_worker import GpuWorker,GpuError
+    with servers(tmp_path) as (address,_),SessionClient(address) as c:
+        c.open_database('demo',True)
+        save_dataset(generate_dataset(1024,3),tmp_path/'imports/a.npz')
+        c.import_dataset('a.npz','items');c.import_dataset('a.npz','other')
+        first=c.build_index('items',nlist=1,device='gpu')
+        c.build_index('other',nlist=1,device='gpu')
+        expected=c.execute(SQL+GPU)['rows']
+        original=GpuWorker.verify_replica
+        def busy(*args,**kwargs):raise GpuError('gpu_queue_full')
+        monkeypatch.setattr(GpuWorker,'verify_replica',busy)
+        with pytest.raises(ValueError,match='RESOURCE_EXHAUSTED.*gpu_queue_full'):
+            c.build_index('items',nlist=1,device='gpu')
+        monkeypatch.setattr(GpuWorker,'verify_replica',original)
+        replicas=[i for i in c.list_indexes() if i['device']=='gpu']
+        assert len(replicas)==2
+        assert all(i['worker_generation']==first['worker_generation'] and i['worker_pid']==first['worker_pid'] for i in replicas)
+        assert c.execute(SQL+GPU)['rows']==expected
+        assert c.execute(SQL.replace('FROM items','FROM other')+GPU)['rows']==expected
