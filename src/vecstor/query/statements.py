@@ -32,6 +32,7 @@ class StatementPlan:
     database_name: str | None = None
     vector: VectorPlan | None = None
     explain: str | None = None
+    settings: tuple = ()
 
     @property
     def is_write(self) -> bool:
@@ -409,7 +410,8 @@ def classify_statement(sql: str) -> StatementPlan:
     if not isinstance(sql, str) or not sql.strip() or len(sql) > 65536:
         raise QueryError('SQL must be nonempty and at most 65536 characters')
     try:
-        statements = sqlglot.parse(sql, read='duckdb')
+        from .execution_settings import VecStorDialect,extract_settings
+        statements = VecStorDialect().parse(sql)
         if len(statements) != 1 or statements[0] is None:
             raise QueryError('Exactly one statement is required')
         tree = statements[0]
@@ -418,7 +420,11 @@ def classify_statement(sql: str) -> StatementPlan:
         # Comments carry no SQL semantics and are not emitted to the executor.
         for node in tree.walk():
             node.pop_comments()
-        return _classify(tree)
+        settings=extract_settings(tree)
+        if any(node.meta.get('execution_settings') for node in tree.walk()):raise QueryError('Nested SETTINGS unsupported')
+        plan=_classify(tree)
+        if settings and plan.kind!='vector':raise QueryError('SETTINGS only supports vector SELECT')
+        return replace(plan,settings=settings) if settings else plan
     except (SqlglotError, RecursionError, ValueError, OverflowError) as error:
         if isinstance(error, QueryError):
             raise

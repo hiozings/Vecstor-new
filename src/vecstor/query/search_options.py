@@ -11,6 +11,9 @@ def validate_profile_id(value):
 
 @dataclass(frozen=True)
 class SearchOptions:
+    device: str = 'cpu'
+    gpu_id: int = 0
+    device_fallback: str = 'error'
     mode: str = 'exact'
     path: str = 'filter-first'
     nprobe: int | None = None
@@ -21,6 +24,10 @@ class SearchOptions:
     quality_profile_id: str | None = None
 
     def validate(self):
+        if self.device not in ('cpu','gpu'):raise ValueError('device must be cpu or gpu')
+        if type(self.gpu_id) is not int or self.gpu_id!=0:raise ValueError('Only gpu_id=0 is supported')
+        if self.device_fallback not in ('error','cpu'):raise ValueError('device_fallback must be error or cpu')
+        if self.device=='gpu' and self.mode!='approx':raise ValueError('GPU requires mode=approx')
         if self.mode not in ('exact', 'approx'):
             raise ValueError('mode must be exact or approx')
         if self.path not in ('filter-first', 'search-first'):
@@ -43,8 +50,9 @@ class SearchOptions:
 
     @classmethod
     def from_proto(cls, value):
-        options = {name: getattr(value, name) for name in ('mode', 'path', 'fallback', 'quality_profile_id') if getattr(value, name)}
+        options = {name: getattr(value, name) for name in ('mode', 'path', 'fallback', 'quality_profile_id', 'device', 'device_fallback') if getattr(value, name)}
         options.update({name: getattr(value, name) for name in ('nprobe', 'candidates', 'max_candidates', 'max_rounds') if value.HasField(name)})
+        if value.HasField('gpu_id'):options['gpu_id']=value.gpu_id
         return cls(**options).validate()
 
     def to_dict(self):

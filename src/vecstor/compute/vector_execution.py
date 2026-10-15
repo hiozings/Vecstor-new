@@ -32,6 +32,7 @@ class TopK:
 def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None):
     started=time.monotonic()
     trace={'plan_version':1,'requested_mode':options.mode,'requested_path':options.path,
+           'requested_device':options.device,'actual_device':'cpu',
            'actual_mode':None,'actual_path':None,'metric':'squared_l2','rerank_precision':'float64',
            'requested_k':plan.limit,'options':options.to_dict(),'rounds':[], 'index':None,
            'fallback_reason':None,'exhaustive_buckets':False,'selector_full_coverage':False,

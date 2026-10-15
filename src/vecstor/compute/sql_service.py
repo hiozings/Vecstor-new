@@ -7,6 +7,7 @@ import grpc
 
 from vecstor.query.statements import classify_statement, safe_name
 from vecstor.query.search_options import SearchOptions
+from vecstor.query.execution_settings import resolve_execution_options
 from vecstor.query.quality_policy import QualityCatalog
 from vecstor.compute.index_manager import IndexManager
 from vecstor.compute.vector_execution import execute_vector
@@ -58,7 +59,8 @@ class SQLComputeService(rpc.SQLComputeServicer):
                         output.update(selected_database_id=database["id"], selected_database_name=database["name"])
                 yield from encode_result(output)
             elif plan.vector is not None:
-                options=SearchOptions.from_proto(request.search_options)
+                options=resolve_execution_options(SearchOptions.from_proto(request.search_options),plan.settings)
+                if options.device=='gpu':raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'gpu_replica_missing')
                 normalized=pb.SQLRequest.FromString(request.SerializeToString())
                 normalized.sql=plan.sql
                 output=execute_vector(self.stub,self.index_manager.registry,normalized,plan.vector,options,
@@ -85,7 +87,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
     def GetSearchCapabilities(self,request,context):
         return pb.ControlResponse(json_result=json.dumps({'ann':True,'algorithm':'cpu_ivfflat',
             'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':False,
-            'quality_profiles':self.quality_catalog.list()}))
+            'execution_settings_version':1,'quality_profiles':self.quality_catalog.list()}))
 
     def BuildIndex(self,request,context):
         try:

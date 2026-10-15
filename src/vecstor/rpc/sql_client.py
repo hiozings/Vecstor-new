@@ -8,6 +8,7 @@ import grpc
 
 from vecstor.query.statements import classify_statement, safe_name
 from vecstor.query.search_options import SearchOptions
+from vecstor.query.execution_settings import resolve_execution_options
 from vecstor.rpc.services_pb2 import Empty
 from vecstor.rpc import sql_pb2 as pb, sql_pb2_grpc as rpc
 from vecstor.rpc.common import OPTIONS, RemoteError, positive_timeout
@@ -118,11 +119,15 @@ class SessionClient:
         self.last_was_write=plan.is_write
         self.last_operation_id=operation_id or str(uuid.uuid4())
         request=pb.SQLRequest(database_id=self.database_id,sql=sql,operation_id=self.last_operation_id)
+        effective=resolve_execution_options(self.search_options,plan.settings) if plan.kind=='vector' else self.search_options
+        needs_device_ack=bool(plan.settings) or effective.device=='gpu'
         if plan.kind == 'vector':
+            if needs_device_ack and self.get_search_capabilities().get('execution_settings_version',0)<1:
+                raise ValueError('Compute service does not support SQL device settings')
             if self.search_options.quality_profile_id is not None and self._quality_supported is not True:
                 self.list_quality_profiles()
-            request.search_options.CopyFrom(self.search_options.to_proto())
-            self.last_search_mode = self.search_options.mode
+            request.search_options.CopyFrom(effective.to_proto())
+            self.last_search_mode = effective.mode
         def events():
             call=self.stub.ExecuteSQL(request,timeout=self.timeout)
             schema=complete=False
@@ -139,6 +144,12 @@ class SessionClient:
                     if event["kind"]=="rows" and any(len(row)!=width for row in event["rows"]):
                         raise ValueError("Result row width differs from schema")
                     if event["kind"]=="complete":
+                        if needs_device_ack:
+                            execution=event.get('execution_plan') or {}
+                            if execution.get('requested_device')!=effective.device or execution.get('actual_device') not in ('cpu','gpu','not_executed'):
+                                raise ValueError('Compute service did not acknowledge requested device')
+                            if effective.device=='gpu' and effective.device_fallback=='error' and execution.get('actual_device')=='cpu':
+                                raise ValueError('Compute service silently changed requested GPU device')
                         profile_id=request.search_options.quality_profile_id
                         if profile_id:
                             execution=event.get('execution_plan') or {}
