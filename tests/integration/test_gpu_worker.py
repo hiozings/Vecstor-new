@@ -82,3 +82,51 @@ def test_queue_limit_and_queued_cancel_do_not_reset_active_gpu():
             assert worker.generation==generation
         finally:os.kill(pid,signal.SIGCONT)
         assert first.result(timeout=3)['ids'][0]==2**60
+
+
+def test_native_worker_dies_if_parent_is_killed_while_worker_is_stopped():
+    import os,signal,subprocess,sys
+    code="""import time,faiss,numpy as np
+from vecstor.index.faiss_backend import FaissIndex
+from vecstor.index.types import BuildConfig
+from vecstor.index.gpu_worker import GpuWorker
+faiss.omp_set_num_threads(1)
+cpu=FaissIndex.build(np.arange(1024,dtype=np.int64),np.arange(2048,dtype=np.float32).reshape(1024,2),BuildConfig(nlist=1))
+w=GpuWorker(scratch_bytes=16*1024**2)
+w.submit_clone('one',cpu.serialize(),time.monotonic()+30)
+print(w.pid,flush=True)
+time.sleep(60)
+"""
+    parent=subprocess.Popen([sys.executable,'-c',code],stdout=subprocess.PIPE,text=True)
+    pid=None
+    try:
+        pid=int(parent.stdout.readline());os.kill(pid,signal.SIGSTOP);parent.kill();parent.wait(timeout=5)
+        def alive():
+            try:return 'State:\tZ' not in open(f'/proc/{pid}/status').read()
+            except FileNotFoundError:return False
+        until=time.monotonic()+2
+        while alive() and time.monotonic()<until:time.sleep(.02)
+        assert not alive(),'Stopped GPU worker survived parent death'
+    finally:
+        if parent.poll() is None:parent.kill();parent.wait()
+        parent.stdout.close()
+        if pid:
+            try:os.kill(pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+
+
+def test_wrong_ipc_identity_is_data_corruption_not_device_unavailability(monkeypatch):
+    import vecstor.index.gpu_worker as module
+    original=module.subprocess.Popen
+    peer="""import sys,json
+from multiprocessing.connection import Connection
+r=Connection(int(sys.argv[1]),readable=True,writable=False);w=Connection(int(sys.argv[2]),readable=False,writable=True)
+x=json.loads(r.recv_bytes());r.recv_bytes()
+w.send_bytes(json.dumps(dict(request_id='wrong',generation=x['generation'],ok=True,result={})).encode())
+"""
+    def corrupt_peer(command,**kwargs):
+        return original([module.sys.executable,'-c',peer,*command[3:]],**kwargs)
+    monkeypatch.setattr(module.subprocess,'Popen',corrupt_peer)
+    with module.GpuWorker() as worker:
+        with pytest.raises(RuntimeError,match='identity'):
+            worker.submit_clone('key',b'fake',time.monotonic()+5)

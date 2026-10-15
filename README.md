@@ -23,7 +23,7 @@ conda create -n vecstor --file environments/vecstor-linux-64.explicit.txt
 
 依赖声明见 `environment.yml`。环境包含 Python、DuckDB、SQLGlot、Faiss CPU/GPU、gRPC/Protobuf 和 pytest。默认检查需要可用的 NVIDIA GPU 和本地 TCP 监听权限；沙箱受限时在沙箱外执行。仅验证 CPU 时可显式使用 `--cpu-only`。
 
-环境检查已通过，P1 本地基线、P2 gRPC 存算分离和 P2.5 交互式 SQL/持久 CRUD 已实现。P3 已接入 CPU Faiss IVFFlat、两条近似路径、候选扩展和执行计划，默认仍为 NumPy float64 精确查询。GPU 业务调度、持久索引分发与自适应策略留待后续阶段。详细版本见 [环境说明](docs/environment.md)，项目计划见 [AGENTS.md](AGENTS.md)。
+环境检查已通过，P1 本地基线、P2 gRPC 存算分离和 P2.5 交互式 SQL/持久 CRUD 已实现。P3 已接入 CPU Faiss IVFFlat、两条近似路径、候选扩展和执行计划，默认仍为 NumPy float64 精确查询。GPU 已新增显式 ANN 先检索路径，CPU 训练与 float64 重排保留；持久索引分发与自适应策略留待后续阶段。详细版本见 [环境说明](docs/environment.md)，项目计划见 [AGENTS.md](AGENTS.md)。
 
 ## 交互式 SQL 终端
 
@@ -121,3 +121,15 @@ python scripts/check_p2.py --output-dir results/p2-check --distribution independ
 验收会自动创建独立服务、施加文件隔离、验证 16 条查询、停止存储后确认查询失败，并回收进程。输出目录必须不存在；沙箱限制网络监听时应在沙箱外运行。详细配置、错误行为与限制见 [P2 服务说明](docs/p2-services.md)。
 
 ANN 质量优化验收：60 组独立留出评估最低平均 Recall@10 为 0.9702，默认仍为精确查询。显式配置与实测延迟、资源、存算隔离证据见 [质量优化验收](docs/validation/ann-recall-optimization.md)；该统计不保证任意数据或每条查询达到同样召回。
+
+## GPU ANN 与逐条 SQL 设备选择
+
+先在已选库的终端显式准备副本：`.index build items --device gpu`。随后可在三维向量查询中指定：
+
+```sql
+SELECT id FROM items WHERE value < 1000
+ORDER BY vector_distance(vector, [0,0,0]) LIMIT 10
+SETTINGS device='gpu', mode='approx', path='search-first';
+```
+
+默认仍为CPU精确查询。GPU仅支持先检索、每轮候选/nprobe最多2048；默认不静默回退CPU。写入/计算重启/worker失效后需显式重建。使用方式、质量与资源边界见 [GPU说明](docs/gpu-search.md)；[GPU验收](docs/validation/gpu-ann.md) 保留不支持及完整性失败组，不宣称所有负载都达标或加速。

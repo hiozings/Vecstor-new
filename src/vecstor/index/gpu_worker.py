@@ -13,6 +13,10 @@ import uuid
 MAX_FRAME=512*1024*1024
 
 
+class GpuDataError(RuntimeError):
+    pass
+
+
 class GpuError(ValueError):
     pass
 
@@ -52,7 +56,7 @@ class GpuWorker:
     def _start(self):
         rx,tx=os.pipe();rr,tt=os.pipe()
         try:
-            process=subprocess.Popen([sys.executable,'-m','vecstor.index.gpu_worker',str(rx),str(tt),str(self.scratch_bytes),str(self.margin_bytes),json.dumps(self.isolation_probe)],
+            process=subprocess.Popen([sys.executable,'-m','vecstor.index.gpu_worker',str(rx),str(tt),str(self.scratch_bytes),str(self.margin_bytes),json.dumps(self.isolation_probe),str(os.getpid())],
                                      pass_fds=(rx,tt),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=None,
                                      env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',CUDA_CACHE_DISABLE='1'))
         except BaseException:
@@ -82,13 +86,20 @@ class GpuWorker:
                     envelope=dict(job.message,request_id=uuid.uuid4().hex,generation=job.generation)
                     sender.send_bytes(json.dumps(envelope).encode())
                     if job.payload is not None:sender.send_bytes(job.payload)
-                    response=json.loads(receiver.recv_bytes(MAX_FRAME))
+                    try:response=json.loads(receiver.recv_bytes(MAX_FRAME))
+                    except (json.JSONDecodeError,UnicodeDecodeError) as error:raise GpuDataError('Malformed GPU response') from error
+                    if not isinstance(response,dict):raise GpuDataError('Malformed GPU response')
                     if response.get('request_id')!=envelope['request_id'] or response.get('generation')!=job.generation:
-                        raise RuntimeError('GPU response identity mismatch')
+                        raise GpuDataError('GPU response identity mismatch')
+                    if response.get('ok') is True and not isinstance(response.get('result'),dict):raise GpuDataError('Malformed GPU result')
                     if not response.get('ok'):raise GpuError(response.get('error','gpu_native_error'))
                     with self._lock:
                         if job.generation!=self.generation:raise GpuError('gpu_worker_generation_changed')
                         job.result=response['result']
+                except GpuDataError as error:
+                    with self._lock:
+                        if process is self._process:self.reset()
+                    job.error=error
                 except GpuError as error:job.error=error
                 except (TimeoutError,InterruptedError) as error:job.error=error
                 except Exception as error:
@@ -147,6 +158,12 @@ class GpuWorker:
 
 
 def main():
+    import ctypes
+    import signal
+    # A wedged/stopped CUDA worker must not outlive a killed compute process.
+    libc=ctypes.CDLL(None,use_errno=True)
+    if libc.prctl(1,signal.SIGKILL,0,0,0)!=0:raise OSError(ctypes.get_errno(),'GPU parent-death signal failed')
+    if os.getppid()!=int(sys.argv[6]):return
     import numpy as np
     import faiss
     import ctypes

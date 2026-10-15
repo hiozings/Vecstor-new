@@ -15,6 +15,17 @@
 
 ### 2026-10-15
 
+#### GPU ANN 首期实现
+
+- 新增SQL SETTINGS逐语句设备/查询参数，服务端AST重验、协议能力/完成帧确认；默认CPU精确查询和原客户端保持兼容。
+- 新增GPU search-first：CPU训练后显式克隆到GPU，保留完整int64 ID、CPU float64重排；单次候选/nprobe上限2048，GPU filter-first明确不支持。
+- 独立worker持有GPU资源，预算/引用/队列/worker generation管理；显式设备回退、GPU索引清理、写入失效和重建。活动超时/取消回收worker；父进程死亡信号防止遗留暂停中的孤儿worker。
+- GPU v2质量配置绑定后端/Faiss版本/机型及实际快照。正式60组校准保留36通过、21不支持、3留出完整性失败，失败组不发布配置；未用CPU回退抬高GPU召回。
+- 1万行真实PTY、GPU worker/计算进程存储读拒绝、worker故障恢复、计算重启/重建和停存储验收通过。CUDA必需procfs/字符设备权限扩展及可信环境边界已写入文档。
+- 新增GPU使用说明、能力/质量验收、校准与RPC成本工具，更新用户说明书、README与AGENTS目录。原说明书/规划先提交bc53887，功能位于codex/gpu-ann；未合并/推送。
+
+#### 初始规划记录
+
 - 新增 GPU ANN 检索设计与六阶段实施计划，记录用户确认的首期范围、拟议 SQL SETTINGS 参数、设备边界、独立 worker、资源预算、质量配置与验收方法；AGENTS 同步计划和文档目录。以上仅规划，不是已交付的 GPU 能力。
 - 规划核查：阅读现有 SQL/索引/执行协议与 Faiss 官方资料；本地 SQLGlot 探测确认当前 DuckDB 方言会把 hint 保留为普通注释、拒绝查询尾部 SETTINGS，后续需显式 AST 扩展。未修改业务代码、未运行真实 GPU 业务验收。
 

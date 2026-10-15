@@ -11,7 +11,7 @@
 - 依据：`README.md` 与 `项目申报书2.pdf`。
 - 申报实施周期：2026-01-01 至 2026-12-31。
 - 预期成果：一套可运行的混合查询存算分离向量数据引擎原型，以及包含架构设计、优化方案和性能测试的结题报告。
-- 已建立 Conda `vecstor` 环境；P1 本地基线、P2 gRPC 服务和 P2.5 交互式 SQL、运行时选库、持久 CRUD 已实现。P2.5 通过真实终端、P1 对照、重启及 Landlock 验收；P3 CPU ANN、双路径、候选扩展和计划展示已实现，通过 427 项回归、1 万行真实终端/Landlock 及 360 次规模实验。GPU 业务路径、索引在线维护和缓存优化仍待实现。
+- 已建立 Conda `vecstor` 环境；P1 本地基线、P2 gRPC 服务和 P2.5 交互式 SQL、运行时选库、持久 CRUD 已实现。P2.5 通过真实终端、P1 对照、重启及 Landlock 验收；P3 CPU ANN、双路径、候选扩展和计划展示已实现，通过 427 项回归、1 万行真实终端/Landlock 及 360 次规模实验。GPU ANN search-first 已接入，索引在线维护与P4数据缓存优化仍待实现。
 - 以下排期按 2026-10-10 起剩余约 12 周制定。若存在其他位置的代码或学校提前验收，应先核实再更新排期。
 
 ## 2. 目标与范围
@@ -57,8 +57,8 @@
 | --- | --- | --- |
 | Python / Conda | 服务编排、查询调度、实验脚本 | Python 3.12.15；复用本机 Conda，独立环境 `vecstor` |
 | DuckDB / SQLGlot | SQL 执行、语法树解析 | DuckDB 1.5.6、SQLGlot 30.21.0；持久 CRUD、受控单表 SQL、向量查询及 MVCC 读租约已实现 |
-| Faiss CPU/GPU | 向量检索、索引保存与加载 | `faiss-gpu` 1.12.0 同时支持 CPU/GPU；组件级 Flat、IVFFlat 与持久化验证通过；P3 业务接入 CPU IVFFlat 内存索引，GPU/业务索引持久化未实现 |
-| CUDA / NumPy | GPU 运行库与精确计算 | CUDA 12.4 运行库、NumPy 1.26.4；P1 使用 CPU NumPy float64 穷举距离，GPU 业务路径待实现 |
+| Faiss CPU/GPU | 向量检索、索引保存与加载 | `faiss-gpu` 1.12.0 同时支持 CPU/GPU；组件级 Flat、IVFFlat 与持久化验证通过；P3 业务接入 CPU IVFFlat 及显式GPU search-first副本；CPU训练/float64重排，业务索引持久化未实现 |
+| CUDA / NumPy | GPU 运行库与精确计算 | CUDA 12.4 运行库、NumPy 1.26.4；P1 使用 CPU NumPy float64 穷举距离，GPU仅ANN检索，精确计算/重排保留CPU |
 | gRPC / Protobuf | 查询、目录、类型化 SQL 结果与读租约 | grpcio/grpcio-tools 1.83.1、protobuf 7.35.1；兼容 P2 v1 并新增 P2.5 v2；索引分发待实现 |
 | prompt_toolkit / Rich | 多行终端、历史/补全与表格 | 3.0.53 / 15.0.0，已通过 Conda 安装并锁定 |
 | Arrow Flight | 批量列式数据传输 | 可选，只有测出传输瓶颈后再评估 |
@@ -109,11 +109,11 @@ P1、P2 与 P2.5 技术交付已完成。旧 P2 只读快照模式保留，P2.5 
 
 P2.5 提前完成了 P4 的部分写入一致性基础，但不代表 ANN 索引更新或优化已实现。设计见 [交互式 SQL 终端](docs/design/interactive-sql-shell.md)，执行记录见 [实施计划](docs/superpowers/plans/2026-10-12-interactive-sql-shell.md)。P3 已复用数据库 revision 和读租约。
 
-P3 CPU 实现见 [使用说明](docs/p3-search.md)、[Faiss 执行设计](docs/design/p3-faiss-execution.md) 和 [六任务实施记录](docs/superpowers/plans/2026-10-13-p3-faiss.md)。保留默认精确模式，显式开启 CPU IVF 的 filter-first/search-first；按快照版本复用索引，候选不足可精确回退，并提供 EXPLAIN/ANALYZE 与实际执行统计。数据库级 revision 保持不变，其他表写入也保守失效。GPU、权威索引持久化/分发、批量维护和自适应策略仍未实现。360 次实验包含 120 次默认精确、168 次真正 ANN、72 次精确回退；默认参数未达到普遍 Recall@10≥0.95，见 [实测召回与资源记录](docs/validation/p3-faiss.md)。
+P3 CPU 实现见 [使用说明](docs/p3-search.md)、[Faiss 执行设计](docs/design/p3-faiss-execution.md) 和 [六任务实施记录](docs/superpowers/plans/2026-10-13-p3-faiss.md)。保留默认精确模式，显式开启 CPU IVF 的 filter-first/search-first；按快照版本复用索引，候选不足可精确回退，并提供 EXPLAIN/ANALYZE 与实际执行统计。数据库级 revision 保持不变，其他表写入也保守失效。该P3验收时GPU尚未接入；权威索引持久化/分发、批量维护和自适应策略仍未实现。360 次实验包含 120 次默认精确、168 次真正 ANN、72 次精确回退；默认参数未达到普遍 Recall@10≥0.95，见 [实测召回与资源记录](docs/validation/p3-faiss.md)。
 
 ANN 质量优化四阶段已完成：显式快照绑定配置、质量预算下限、查询内选择器复用及候选批量绑定/租约计划缓存。60 组各 500 个独立留出查询，最低平均 Recall@10=0.9702，零精确回退；最终 720 次隔离 RPC 对照及 96 组成本消融通过。默认 exact 与未选择配置时的 ANN 参数保持不变；不是任意数据或逐查询召回保证。见 [最终验收与成本](docs/validation/ann-recall-optimization.md) 和 [实施计划](docs/superpowers/plans/2026-10-13-ann-recall-optimization.md)。
 
-GPU ANN 下一阶段处于规划、待评审状态：用户确认首期只加速 ANN 检索，CPU 训练、精确基线与 float64 重排保持不变。拟以 SQL SETTINGS 逐请求选择设备，先接入 GPU search-first；能力边界、显存与故障管理、GPU 独立质量证据见 [设计](docs/design/gpu-ann-execution.md) 和 [实施计划](docs/superpowers/plans/2026-10-15-gpu-ann.md)。尚未实现，不代表 GPU 业务查询可用。
+GPU ANN 已按计划接入：SQL SETTINGS逐请求选择CPU/GPU、显式GPU副本、独立worker/预算/设备回退，首期仅GPU search-first。真实GPU校准60组：36通过、21不支持、3留出完整性失败；失败组不导出质量配置，不承诺所有负载纯GPU达标。CPU训练、精确基线和float64重排保持不变。实现与限制见 [GPU说明](docs/gpu-search.md)、[验收记录](docs/validation/gpu-ann.md) 和 [实施计划](docs/superpowers/plans/2026-10-15-gpu-ann.md)。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -145,6 +145,8 @@ GPU ANN 下一阶段处于规划、待评审状态：用户确认首期只加速
 │   ├── serve.py          # 存储/计算服务进程入口
 │   ├── check_p2.py       # 独立进程、P1 对照及 Landlock 隔离验收
 │   ├── check_shell.py    # 真实终端、持久 CRUD、重启和隔离验收
+│   ├── check_gpu_ann.py  # 独立子进程GPU组件能力探测
+│   ├── check_gpu.py      # 真实GPU/PTY/双进程存储隔离和生命周期验收
 │   ├── check_p3.py       # CPU ANN 双路径、真实终端与隔离验收
 │   └── generate_proto.py # 生成协议 Python 模块
 ├── proto/vecstor/rpc/services.proto # P2 v1 协议源文件
@@ -159,7 +161,7 @@ GPU ANN 下一阶段处于规划、待评审状态：用户确认首期只加速
 │   ├── isolation.py      # 计算进程 Landlock 权限与拒绝读取探针
 │   ├── storage/          # service.py 兼容 P2；catalog/database/sql_service 管理持久库、事务、租约
 │   ├── compute/          # P2 RemoteEngine、v2 路由、lease_io/index_manager/vector_execution
-│   ├── index/            # CPU IVF 后端、快照键、带引用的有界 registry、可取消构建进程
+│   ├── index/            # GPU worker/副本管理及CPU IVF 后端、快照键、带引用的有界 registry、可取消构建进程
 │   ├── rpc/              # v1/v2 协议、会话客户端、类型化结果、生命周期和验收
 │   ├── shell/            # app/buffer/commands/render/completion：交互界面及分句
 │   └── query/
@@ -167,6 +169,7 @@ GPU ANN 下一阶段处于规划、待评审状态：用户确认首期只加速
 │       ├── parser.py     # SQL AST 白名单、参数化过滤计划
 │       ├── statements.py # 普通 SQL/CRUD/库命令/内联向量/EXPLAIN 校验
 │       ├── search_options.py # 请求级精确/近似路径、质量配置和候选预算
+│       ├── execution_settings.py # SQLGlot SETTINGS扩展与逐请求选项合并
 │       ├── quality_policy.py # 快照/SQL 范围匹配、证据校验和质量预算
 │       └── engine.py     # 本地 DuckDB 过滤、块式精确 Top-K
 ├── benchmarks/p3/
@@ -174,6 +177,7 @@ GPU ANN 下一阶段处于规划、待评审状态：用户确认首期只加速
 │   ├── costs.py          # 训练参数探索、RPC 并发与绑定/缓存成本消融
 │   ├── calibrate.py      # 独立校准/留出、带簇负载、冻结配置与恢复运行
 │   └── validate_quality.py # 冻结参数 RPC 对照及实际快照绑定
+├── benchmarks/gpu/       # GPU独立校准、质量配置导出及CPU/GPU RPC成本对照
 ├── configs/quality/       # 质量配置示例，绑定实际快照而非通用默认参数
 ├── tests/
 │   ├── unit/             # 数据、SQL、持久事务、协议、终端输入与 PTY 测试
@@ -183,23 +187,26 @@ GPU ANN 下一阶段处于规划、待评审状态：用户确认首期只加速
 │   ├── environment.md    # 环境使用、复现及验证记录
 │   ├── p2-services.md    # P2 启停、查询、隔离验收与限制
 │   ├── sql-shell.md      # P2.5 安装入口、界面、SQL 范围与使用方法
+│   ├── gpu-search.md     # GPU SQL、设备/资源、质量和故障说明
 │   ├── p3-search.md      # ANN 命令、资源/版本语义与实验复现
 │   ├── design/data-and-query-spec.md # P1 数据与查询契约
 │   ├── design/p2-grpc.md  # P2 协议、快照与隔离设计
 │   ├── design/interactive-sql-shell.md # P2.5 终端与可写数据库设计
 │   ├── design/p3-faiss-execution.md # P3 索引、两路径与计划展示设计
-│   ├── design/gpu-ann-execution.md # GPU ANN 与 SQL 设备选择设计（待实施）
+│   ├── design/gpu-ann-execution.md # GPU ANN 与 SQL 设备选择设计
 │   ├── design/ann-recall-optimization.md # 低召回原因、校准证据和成本评估
 │   ├── validation/p1-local-baseline.md # P1 验收结果与局限
 │   ├── validation/p2-grpc.md # P2 对照、隔离与审查修复证据
 │   ├── validation/p25-sql-shell.md # P2.5 终端、持久化、P1 对照和隔离证据
 │   ├── validation/ann-recall-optimization.md # 正式质量、成本、资源及隔离证据
+│   ├── validation/gpu-ann-capabilities.md # GPU原生能力边界
+│   ├── validation/gpu-ann.md # GPU质量/隔离/成本/限制
 │   ├── validation/p3-faiss.md # P3 CPU 回归、隔离、召回实验与已知限制
 │   ├── superpowers/plans/2026-10-11-local-baseline.md # 执行计划与记录
 │   ├── superpowers/plans/2026-10-12-p2-grpc.md # P2 执行记录
 │   ├── superpowers/plans/2026-10-12-interactive-sql-shell.md # P2.5 执行计划与完成记录
 │   ├── superpowers/plans/2026-10-13-p3-faiss.md # P3 六任务实施计划
-│   ├── superpowers/plans/2026-10-15-gpu-ann.md # GPU 六阶段实施计划（待实施）
+│   ├── superpowers/plans/2026-10-15-gpu-ann.md # GPU 六阶段实施记录
 │   ├── superpowers/plans/2026-10-13-ann-recall-optimization.md # 质量校准、配置与优化实施记录
 │   └── research/
 │       └── github-reference-survey.md # 相关仓库、复用入口与接入建议
@@ -315,3 +322,12 @@ src/vecstor/
 - 最终交付：源码与固定依赖、部署说明、查询示例、基准脚本与数据说明、原始结果和图表、结题报告、答辩 PPT 与演示备份。
 
 候选过滤默认使用绑定 BIGINT[] 文本参数，每条活跃租约至多缓存一份谓词计划（原 SQL 与生成 SQL 各最多 64 KiB），结束租约释放。存储选项 `--candidate-binding legacy` 和 `--no-candidate-plan-cache` 用于独立消融；不是 P4 数据缓存。
+
+### GPU 首期约束
+
+- 默认CPU exact；SETTINGS仅向量SELECT/EXPLAIN可用，SQL覆盖会话不改变会话。GPU仅approx/search-first、gpu_id=0，单次L/nprobe≤2048。显式GPU默认device_fallback=error，不能静默转CPU或截断预算。
+- CPU/GPU副本分别管理，GPU句柄绑定完整IndexKey及worker generation；显式CPU训练/克隆，无查询时隐藏构建。默认GPU逻辑512MiB/8条目、scratch128MiB、设备余量256MiB、1活动/8等待，均非显存硬限。
+- 单owner新解释器worker拥有GPU资源。活动取消/超时回收worker，失效其全部副本和等待请求；CPU服务继续可用，必须显式重建。损坏数据/取消/deadline不被回退吞掉。
+- v1质量配置只用于CPU；GPU v2还绑定float32、Faiss版本、机型及独立证据。校准/评估失败组不发布，不用CPU回退充当GPU质量。
+- GPU隔离允许CUDA所需procfs读及既有伪文件写/截断、CPU拓扑和指定字符设备；存储目录/文件仍须在计算进程和GPU worker内实际验证读拒绝。不是恶意同用户进程通用沙箱。
+- 真实GPU验收 `python scripts/check_gpu.py --output-dir results/gpu-check`；GPU强制测试 `VECSTOR_REQUIRE_GPU=1 python -m pytest -q`。无GPU环境专属测试明确skip，不能当作GPU成功。实验见 `benchmarks/gpu/`。

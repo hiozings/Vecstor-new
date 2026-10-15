@@ -1,6 +1,6 @@
 # GPU ANN 检索与 SQL 设备选择设计
 
-日期：2026-10-15。状态：待评审，尚未实施。用户已确认首期只做 GPU ANN 检索，保留 CPU float64 精确基线与重排。
+日期：2026-10-15。状态：用户于2026-10-15确认并进入实施，实际验证及裁定见 [GPU验收](../validation/gpu-ann.md)。用户已确认首期只做 GPU ANN 检索，保留 CPU float64 精确基线与重排。
 
 ## 目标与选型
 
@@ -16,7 +16,7 @@
 
 首期保证 CPU 两路径不退化，新增 **GPU search-first**。GPU filter-first 需要本机版本确实支持正确的过滤选择器；不以“全局检索后过滤”伪装为先过滤。首期未通过选择器验证时，该组合明确不支持，后续另立扩展任务。
 
-## SQL 与命令约定（拟新增，当前不可执行）
+## SQL 与命令约定
 
 ```sql
 SELECT id, category, vector_distance(vector, [0,0,0]) AS distance
@@ -25,7 +25,7 @@ ORDER BY distance LIMIT 10
 SETTINGS device = 'gpu', mode = 'approx', path = 'search-first';
 ```
 
-同一语句改为 `device='cpu'` 即选择 CPU。`SETTINGS` 是 VecStor 方言扩展，不是 DuckDB 原生能力。当前 SQLGlot DuckDB 方言拒绝该尾部语法；实现时扩展其 tokenizer/parser 和 AST，仅放开这一个向量查询扩展，不改用宽松的通用方言解析全部 SQL。
+同一语句改为 `device='cpu'` 即选择 CPU。`SETTINGS` 是 VecStor 方言扩展，不是 DuckDB 原生能力。原 SQLGlot DuckDB 方言拒绝该尾部语法；已扩展其 tokenizer/parser 和 AST，仅放开这一个向量查询扩展，不改用宽松的通用方言解析全部 SQL。
 
 未带 SETTINGS 的 SQL 保持原行为。参数优先级为“本条 SQL > 会话 > 原默认值”；合并后整体校验，不修改会话。指定 device 本身不隐式改变 mode/path，因而 `device='gpu'` 与默认 exact 冲突时应提示同时指定 approx/search-first。完整示例包含三项，避免依赖会话状态。
 

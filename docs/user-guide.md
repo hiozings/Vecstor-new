@@ -1,6 +1,6 @@
 # VecStor 用户使用说明书
 
-适用版本：2026-10-14 的 P3 与 ANN 召回率优化版本。
+适用版本：2026-10-15 的 P3、ANN 召回率优化与GPU先检索版本。
 
 VecStor 支持在同一条 SQL 中筛选结构化字段，并按向量距离返回最相近的记录。它也支持普通表的查询、聚合和基础增删改。默认采用精确向量查询；需要加速时，可以显式建立 CPU Faiss 索引并启用近似查询。
 
@@ -16,7 +16,7 @@ VecStor 支持在同一条 SQL 中筛选结构化字段，并按向量距离返�
 
 终端与计算服务通过网络访问数据，不直接打开数据库文件。关闭交互终端不会停止服务，也不会删除已提交的数据。
 
-当前业务检索使用 CPU。环境中的 Faiss GPU 包不表示查询已经使用 GPU。当前服务适用于可信本机或受控网络实验，尚无 TLS 和用户鉴权，不应直接暴露到公网。
+默认业务检索使用 CPU；GPU ANN 需显式构建GPU副本并通过SQL选择，精确模式和float64重排仍在CPU。当前服务适用于可信本机或受控网络实验，尚无 TLS 和用户鉴权，不应直接暴露到公网。
 
 ## 2. 准备环境
 
@@ -361,3 +361,21 @@ vecstor serve compute --storage 127.0.0.1:50051 \
 计算进程将通过 Landlock 禁止读取该数据根，并验证目录和文件访问被拒绝；之后仍通过 RPC 正常查询。隔离初始化失败会停止服务。若同时加载质量配置，该文件必须位于数据根之外。
 
 索引默认逻辑预算为 256 MiB、8 个条目，可用 `--index-memory-mib` 和 `--index-max-entries` 调整。逻辑预算不是进程 RSS 硬上限，初版也不支持超内存检索。更详细的资源、服务及查询约束见 [SQL 终端](sql-shell.md) 和 [P3 使用说明](p3-search.md)。
+
+## 14. 在 SQL 中选择 GPU
+
+本节使用前面至少1024行的 `guide_ann.items`（三维）。先 `.open guide_ann`，再显式构建：
+
+```text
+.index build items --device gpu
+.index list
+```
+
+```sql
+SELECT id, vector_distance(vector, [0,0,0]) AS distance
+FROM items WHERE value < 1000
+ORDER BY distance LIMIT 10
+SETTINGS device='gpu', mode='approx', path='search-first';
+```
+
+SETTINGS 仅覆盖当前语句，改为device='cpu'可切换CPU。GPU不能用于exact或filter-first。默认GPU不可用时明确失败；需允许转CPU才增加 `device_fallback='cpu'`，然后核对结果的实际设备/模式。候选上限2048可能使低通过率查询失败；CPU v1质量配置不能当作GPU证据。完整参数、索引重建、显存和隔离限制见 [GPU使用说明](gpu-search.md)。

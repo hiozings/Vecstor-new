@@ -10,6 +10,7 @@ from vecstor.query.search_options import SearchOptions
 from vecstor.query.execution_settings import resolve_execution_options
 from vecstor.query.quality_policy import QualityCatalog
 from vecstor.compute.index_manager import IndexManager
+from vecstor.index.gpu_worker import GpuDataError
 from vecstor.compute.vector_execution import execute_vector
 from vecstor.rpc import sql_pb2 as pb, sql_pb2_grpc as rpc
 from vecstor.rpc.common import OPTIONS, RemoteError, active
@@ -79,6 +80,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
             context.abort(error.code(), error.details())
         except RemoteError as error:
             context.abort(error.code, error.details)
+        except GpuDataError as error:context.abort(grpc.StatusCode.DATA_LOSS,str(error))
         except TimeoutError as error:context.abort(grpc.StatusCode.DEADLINE_EXCEEDED,str(error))
         except InterruptedError as error:context.abort(grpc.StatusCode.CANCELLED,str(error))
         except ValueError as error:
@@ -98,6 +100,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
             return pb.ControlResponse(json_result=json.dumps(output,allow_nan=False))
         except RemoteError as error: context.abort(error.code,error.details)
         except grpc.RpcError as error: context.abort(error.code(),error.details())
+        except GpuDataError as error:context.abort(grpc.StatusCode.DATA_LOSS,str(error))
         except ValueError as error: context.abort(grpc.StatusCode.INVALID_ARGUMENT,str(error))
 
     def ListIndexes(self,request,context):
@@ -106,6 +109,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
             table=safe_name(request.table) if request.table else ''
             output=[dict(v,device='cpu') for v in self.index_manager.registry.list(request.database_id,table)]+self.index_manager.gpu_registry.list(request.database_id,table)
             return pb.ControlResponse(json_result=json.dumps(output,allow_nan=False))
+        except GpuDataError as error:context.abort(grpc.StatusCode.DATA_LOSS,str(error))
         except ValueError as error: context.abort(grpc.StatusCode.INVALID_ARGUMENT,str(error))
 
     def ClearIndexes(self,request,context):
@@ -119,4 +123,5 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 result=registry.clear(request.database_id,table)
                 for key in output:output[key]+=result[key]
             return pb.ControlResponse(json_result=json.dumps(output))
+        except GpuDataError as error:context.abort(grpc.StatusCode.DATA_LOSS,str(error))
         except ValueError as error: context.abort(grpc.StatusCode.INVALID_ARGUMENT,str(error))
