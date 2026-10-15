@@ -32,3 +32,17 @@ def test_device_acknowledgement_required_even_on_warm_client(tmp_path,monkeypatc
         monkeypatch.setattr(c.stub,'ExecuteSQL',lambda *a,**k:Call())
         with pytest.raises(ValueError,match='device'):
             c.execute(SQL+" SETTINGS device='cpu'")
+
+
+def test_old_service_cannot_ignore_gpu_index_controls(monkeypatch):
+    client=SessionClient('127.0.0.1:1')
+    try:
+        client.database_id='db';calls=[]
+        monkeypatch.setattr(client,'get_search_capabilities',lambda:{'execution_settings_version':1,'gpu':False})
+        monkeypatch.setattr(client,'_typed_control',lambda *a,**k:calls.append(a) or {'state':'ready'})
+        with pytest.raises(ValueError,match='device|GPU'):client.build_index('items',device='gpu')
+        with pytest.raises(ValueError,match='device|GPU'):client.clear_indexes('items',device='gpu')
+        assert not calls
+        monkeypatch.setattr(client,'get_search_capabilities',lambda:{'index_devices_version':1})
+        with pytest.raises(ValueError,match='acknowledge|device'):client.build_index('items',device='gpu')
+    finally:client.close()

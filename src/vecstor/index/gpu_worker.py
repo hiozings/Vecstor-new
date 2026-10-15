@@ -3,7 +3,7 @@ from dataclasses import dataclass,field
 import json
 import os
 from multiprocessing.connection import Connection
-from queue import Queue,Full,Empty
+from collections import deque
 import subprocess
 import sys
 import threading
@@ -39,8 +39,15 @@ class GpuWorker:
     def __init__(self,scratch_bytes=128*1024**2,margin_bytes=256*1024**2,max_pending=8,isolation_probe=None):
         if min(scratch_bytes,margin_bytes)<0 or max_pending<1:raise ValueError('Invalid GPU budgets')
         self.scratch_bytes=scratch_bytes;self.margin_bytes=margin_bytes;self.isolation_probe=isolation_probe
-        self._queue=Queue(max_pending);self._lock=threading.RLock();self._thread=None
-        self._process=None;self._closed=False;self.generation=1
+        self._queue=deque();self._max_pending=max_pending;self._lock=threading.RLock();self._condition=threading.Condition(self._lock);self._thread=None
+        self._process=None;self._closed=False;self._generation=1
+
+    @property
+    def generation(self):
+        with self._lock:
+            if self._process is not None and self._process.poll() is not None:
+                self._process.wait();self._process=None;self._generation+=1
+            return self._generation
 
     @property
     def pid(self):
@@ -48,7 +55,7 @@ class GpuWorker:
 
     def reset(self):
         with self._lock:
-            process=self._process;self._process=None;self.generation+=1
+            process=self._process;self._process=None;self._generation+=1
             if process is not None:
                 if process.poll() is None:process.kill()
                 process.wait(timeout=5)
@@ -69,8 +76,10 @@ class GpuWorker:
         process=sender=receiver=None
         try:
             while True:
-                job=self._queue.get()
-                if job is None:return
+                with self._condition:
+                    while not self._queue and not self._closed:self._condition.wait()
+                    if not self._queue and self._closed:return
+                    job=self._queue.popleft()
                 try:
                     with self._lock:
                         if self._closed:raise GpuError('gpu_worker_closed')
@@ -92,7 +101,10 @@ class GpuWorker:
                     if response.get('request_id')!=envelope['request_id'] or response.get('generation')!=job.generation:
                         raise GpuDataError('GPU response identity mismatch')
                     if response.get('ok') is True and not isinstance(response.get('result'),dict):raise GpuDataError('Malformed GPU result')
-                    if not response.get('ok'):raise GpuError(response.get('error','gpu_native_error'))
+                    if response.get('ok') is not True:
+                        if response.get('error_kind')=='data':raise GpuDataError(response.get('error','GPU data corruption'))
+                        if response.get('ok') is not False or response.get('error_kind')!='device':raise GpuDataError('Malformed GPU failure')
+                        raise GpuError(response.get('error','gpu_native_error'))
                     with self._lock:
                         if job.generation!=self.generation:raise GpuError('gpu_worker_generation_changed')
                         job.result=response['result']
@@ -106,7 +118,7 @@ class GpuWorker:
                     with self._lock:
                         if process is self._process:self.reset()
                     job.error=GpuError('gpu_worker_failed: '+str(error))
-                finally:job.active=False;job.done.set()
+                finally:job.payload=None;job.active=False;job.done.set()
         finally:
             if sender:sender.close();receiver.close()
 
@@ -120,13 +132,16 @@ class GpuWorker:
             job=Job(message,payload,deadline,cancelled,self.generation)
             if self._thread is None:
                 self._thread=threading.Thread(target=self._dispatch,name='vecstor-gpu-owner',daemon=True);self._thread.start()
-            try:self._queue.put_nowait(job)
-            except Full:raise GpuError('gpu_queue_full')
+            if len(self._queue)>=self._max_pending:raise GpuError('gpu_queue_full')
+            self._queue.append(job);self._condition.notify()
         while not job.done.wait(.01):
             if cancelled() or time.monotonic()>=deadline:
                 with self._lock:
                     job.abandoned=True
                     if job.active and job.generation==self.generation:self.reset()
+                    elif not job.active:
+                        try:self._queue.remove(job)
+                        except ValueError:pass
                 if cancelled():raise InterruptedError('GPU request cancelled')
                 raise TimeoutError('GPU deadline exceeded')
         if cancelled():raise InterruptedError('GPU request cancelled')
@@ -149,9 +164,9 @@ class GpuWorker:
     def close(self):
         with self._lock:
             if self._closed:return
-            self._closed=True;self.reset()
+            self._closed=True;self.reset();self._condition.notify_all()
         if self._thread:
-            self._queue.put(None);self._thread.join(timeout=5)
+            self._thread.join(timeout=5)
 
     def __enter__(self):return self
     def __exit__(self,*args):self.close()
@@ -181,49 +196,54 @@ def main():
         except PermissionError:pass
         isolation={'directory_denied':True,'file_denied':True}
     resource=None;indices={}
+    def execute_native(request):
+        nonlocal resource
+        started=time.perf_counter()
+        action=request['action'];key=request['key']
+        if action=='clone':
+            payload=receiver.recv_bytes(MAX_FRAME)
+            if resource is None:
+                if faiss.get_num_gpus()<1:raise GpuError('gpu_unavailable')
+                resource=faiss.StandardGpuResources();resource.setTempMemory(scratch)
+            cpu=FaissIndex.deserialize(payload)
+            runtime=ctypes.CDLL(os.path.join(sys.prefix,'lib','libcudart.so.12'))
+            if runtime.cudaSetDevice(0):raise GpuError('gpu_unavailable')
+            free,total=ctypes.c_size_t(),ctypes.c_size_t()
+            if runtime.cudaMemGetInfo(ctypes.byref(free),ctypes.byref(total)):raise GpuError('gpu_memory_query_failed')
+            if free.value<cpu.byte_size*2+scratch+margin:raise GpuError('gpu_memory_budget')
+            opts=faiss.GpuClonerOptions();opts.useFloat16=False;opts.indicesOptions=faiss.INDICES_64_BIT
+            gpu=faiss.index_cpu_to_gpu(resource,0,cpu._index,opts)
+            if gpu.ntotal!=cpu.row_count or gpu.d!=cpu.dimension:raise GpuDataError('gpu_clone_identity_mismatch')
+            indices[key]=gpu
+            name=ctypes.create_string_buffer(256)
+            driver=ctypes.CDLL('libcuda.so.1')
+            device_name=name.value.decode() if driver.cuDeviceGetName(name,256,0)==0 else 'unknown'
+            result={'row_count':cpu.row_count,'dimension':cpu.dimension,'nlist':cpu.nlist,'free_before_bytes':free.value,
+                    'total_vram_bytes':total.value,'gpu_model':device_name,'worker_pid':os.getpid(),'isolation':isolation}
+        elif action=='release':
+            indices.pop(key,None);result={}
+        elif action=='search':
+            if key not in indices:raise GpuError('gpu_replica_missing')
+            gpu=indices[key];q=np.asarray(request['query'],dtype=np.float32)
+            count,nprobe=request['count'],request['nprobe']
+            if q.shape!=(gpu.d,) or not np.isfinite(q).all():raise GpuError('gpu_invalid_query')
+            if not 1<=count<=2048 or not 1<=nprobe<=min(2048,gpu.nlist):raise GpuError('gpu_search_limits')
+            d,i=gpu.search(q.reshape(1,-1),count,params=faiss.SearchParametersIVF(nprobe=nprobe))
+            valid=i[0]!=-1
+            if not np.isfinite(d[0][valid]).all():raise GpuDataError('gpu_nonfinite_result')
+            result={'ids':i[0][valid].tolist(),'distances':d[0][valid].tolist()}
+        else:raise GpuError('gpu_unknown_action')
+        result['gpu_host_ms']=(time.perf_counter()-started)*1000
+        return result
     try:
         while True:
             try:request=json.loads(receiver.recv_bytes(1024*1024))
             except EOFError:return
             started=time.perf_counter()
             try:
-                action=request['action'];key=request['key']
-                if action=='clone':
-                    payload=receiver.recv_bytes(MAX_FRAME)
-                    if resource is None:
-                        if faiss.get_num_gpus()<1:raise GpuError('gpu_unavailable')
-                        resource=faiss.StandardGpuResources();resource.setTempMemory(scratch)
-                    cpu=FaissIndex.deserialize(payload)
-                    runtime=ctypes.CDLL(os.path.join(sys.prefix,'lib','libcudart.so.12'))
-                    if runtime.cudaSetDevice(0):raise GpuError('gpu_unavailable')
-                    free,total=ctypes.c_size_t(),ctypes.c_size_t()
-                    if runtime.cudaMemGetInfo(ctypes.byref(free),ctypes.byref(total)):raise GpuError('gpu_memory_query_failed')
-                    if free.value<cpu.byte_size*2+scratch+margin:raise GpuError('gpu_memory_budget')
-                    opts=faiss.GpuClonerOptions();opts.useFloat16=False;opts.indicesOptions=faiss.INDICES_64_BIT
-                    gpu=faiss.index_cpu_to_gpu(resource,0,cpu._index,opts)
-                    if gpu.ntotal!=cpu.row_count or gpu.d!=cpu.dimension:raise GpuError('gpu_clone_identity_mismatch')
-                    indices[key]=gpu
-                    name=ctypes.create_string_buffer(256)
-                    driver=ctypes.CDLL('libcuda.so.1')
-                    device_name=name.value.decode() if driver.cuDeviceGetName(name,256,0)==0 else 'unknown'
-                    result={'row_count':cpu.row_count,'dimension':cpu.dimension,'nlist':cpu.nlist,'free_before_bytes':free.value,
-                            'total_vram_bytes':total.value,'gpu_model':device_name,'worker_pid':os.getpid(),'isolation':isolation}
-                elif action=='release':
-                    indices.pop(key,None);result={}
-                elif action=='search':
-                    if key not in indices:raise GpuError('gpu_replica_missing')
-                    gpu=indices[key];q=np.asarray(request['query'],dtype=np.float32)
-                    count,nprobe=request['count'],request['nprobe']
-                    if q.shape!=(gpu.d,) or not np.isfinite(q).all():raise GpuError('gpu_invalid_query')
-                    if not 1<=count<=2048 or not 1<=nprobe<=min(2048,gpu.nlist):raise GpuError('gpu_search_limits')
-                    d,i=gpu.search(q.reshape(1,-1),count,params=faiss.SearchParametersIVF(nprobe=nprobe))
-                    valid=i[0]!=-1
-                    if not np.isfinite(d[0][valid]).all():raise GpuError('gpu_nonfinite_result')
-                    result={'ids':i[0][valid].tolist(),'distances':d[0][valid].tolist()}
-                else:raise GpuError('gpu_unknown_action')
-                result['gpu_host_ms']=(time.perf_counter()-started)*1000
-                response={'ok':True,'result':result}
-            except Exception as error:response={'ok':False,'error':'gpu_native_error: '+str(error)}
+                response={'ok':True,'result':execute_native(request)}
+            except GpuDataError as error:response={'ok':False,'error_kind':'data','error':str(error)}
+            except Exception as error:response={'ok':False,'error_kind':'device','error':'gpu_native_error: '+str(error)}
             response.update(request_id=request['request_id'],generation=request['generation'])
             sender.send_bytes(json.dumps(response,allow_nan=False).encode())
     finally:indices.clear();receiver.close();sender.close()

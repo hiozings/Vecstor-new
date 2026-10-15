@@ -26,3 +26,11 @@
 - Landlock诊断通过strace确认CUDA需要/proc/self/maps读取及/proc/self/task/<tid>/comm写入。GPU策略允许只读procfs/CPU拓扑、既有procfs伪文件写/截断及指定NVIDIA字符设备，不新增创建/删除权；存储目录读写仍拒绝。因子进程PID动态变化，procfs规则较宽；这不是恶意同用户进程的安全沙箱。worker继承Landlock并再次证明存储读拒绝，未降低为无隔离运行。
 - GPU活动任务取消/超时终止整个单设备worker，失效该generation全部副本/排队任务；需要显式重建，CPU服务保持可用。
 - 校准中不完整组不发布配置，保留失败；不扩张本期到分片GPU检索来掩盖2048候选限制。
+
+## 独立审查与最终回归
+
+一次fresh-context独立代码审查提出4项P2：native循环保留最后访问索引/临时CPU数据引用、非有限结果错误分类、旧服务可能忽略GPU构建/清理设备字段、排队取消未释放容量。均先复现失败再修复：每请求native局部作用域、DATA_LOSS跨IPC保留、设备控制能力与响应确认、可移除的有界等待队列。实际NVML测试确认65536×128索引清理释放超过24MiB显存；允许CPU回退时损坏数据仍失败。
+
+另补强显式重建对已退出worker的检测，不要求用户先发送失败查询；变异测试去掉检测后可重现旧问题。测试等待实际进程退出，避免混淆SIGKILL投递与驱动清理完成。
+
+最终命令 `VECSTOR_REQUIRE_GPU=1 conda run --no-capture-output -n vecstor python -m pytest -q`：**514 passed in 92.73s**，真实GPU测试未跳过。审查未独立重跑GPU/性能实验，测试与性能结论来自此处记录的执行证据；未安排第二次审查。

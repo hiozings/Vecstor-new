@@ -88,3 +88,33 @@ def test_clear_gpu_replica_preserves_cpu_index(tmp_path):
         assert all(i['device']=='cpu' for i in c.list_indexes())
         with pytest.raises(ValueError,match='gpu_replica_missing'):c.execute(SQL+GPU)
         assert c.execute(SQL+GPU.replace("device='gpu'","device='cpu'"))['execution_plan']['actual_mode']=='approx'
+
+
+def test_gpu_data_corruption_cannot_use_explicit_cpu_fallback(tmp_path,monkeypatch):
+    from vecstor.index.gpu_backend import GpuIndex
+    from vecstor.index.gpu_worker import GpuDataError
+    with servers(tmp_path) as (address,_),SessionClient(address) as c:
+        c.open_database('demo',True);save_dataset(generate_dataset(2048,3),tmp_path/'imports/a.npz');c.import_dataset('a.npz','items');c.build_index('items',nlist=1,device='gpu')
+        def corrupt(*a,**kw):raise GpuDataError('gpu_nonfinite_result')
+        monkeypatch.setattr(GpuIndex,'search',corrupt)
+        with pytest.raises(ValueError,match='DATA_LOSS.*gpu_nonfinite_result'):
+            c.execute(SQL+GPU+",device_fallback='cpu'")
+
+
+def test_explicit_build_recovers_dead_worker_without_a_probe_query(tmp_path):
+    import os,signal,time
+    with servers(tmp_path) as (address,_),SessionClient(address) as c:
+        c.open_database('demo',True);save_dataset(generate_dataset(2048,3),tmp_path/'imports/a.npz');c.import_dataset('a.npz','items')
+        first=c.build_index('items',nlist=1,device='gpu');os.kill(first['worker_pid'],signal.SIGKILL)
+        # SIGKILL delivery precedes GPU driver teardown; wait for actual exit.
+        until=time.monotonic()+5
+        while True:
+            try:
+                with open(f"/proc/{first['worker_pid']}/status") as source:status=source.read()
+                if 'State:\tZ' in status:break
+            except FileNotFoundError:break
+            assert time.monotonic()<until,'GPU worker did not exit'
+            time.sleep(.02)
+        rebuilt=c.build_index('items',nlist=1,device='gpu')
+        assert rebuilt['worker_pid']!=first['worker_pid'] and rebuilt['reused'] is False
+        assert c.execute(SQL+GPU)['execution_plan']['actual_device']=='gpu'

@@ -17,6 +17,8 @@
 
 #### GPU ANN 首期实现
 
+- 最终强制真实GPU完整回归514项通过（92.73秒）。独立审查的4项P2均补失败回归并修复；实际显存释放、数据错误不回退、旧服务设备控制拒绝和排队取消容量回收已验证，另补强已退出worker的显式重建。
+
 - 新增SQL SETTINGS逐语句设备/查询参数，服务端AST重验、协议能力/完成帧确认；默认CPU精确查询和原客户端保持兼容。
 - 新增GPU search-first：CPU训练后显式克隆到GPU，保留完整int64 ID、CPU float64重排；单次候选/nprobe上限2048，GPU filter-first明确不支持。
 - 独立worker持有GPU资源，预算/引用/队列/worker generation管理；显式设备回退、GPU索引清理、写入失效和重建。活动超时/取消回收worker；父进程死亡信号防止遗留暂停中的孤儿worker。

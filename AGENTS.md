@@ -62,7 +62,7 @@
 | gRPC / Protobuf | 查询、目录、类型化 SQL 结果与读租约 | grpcio/grpcio-tools 1.83.1、protobuf 7.35.1；兼容 P2 v1 并新增 P2.5 v2；索引分发待实现 |
 | prompt_toolkit / Rich | 多行终端、历史/补全与表格 | 3.0.53 / 15.0.0，已通过 Conda 安装并锁定 |
 | Arrow Flight | 批量列式数据传输 | 可选，只有测出传输瓶颈后再评估 |
-| pytest | 正确性、接口与集成测试 | 9.1.1；473 项 P1/P2/P2.5/P3/质量优化测试通过，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
+| pytest | 正确性、接口与集成测试 | 9.1.1；514 项 P1/P2/P2.5/P3/质量优化/GPU测试通过，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
 | 容器与部署脚本 | 隔离部署、复现实验 | 随原型补充，不先引入复杂集群平台 |
 
 安装状态与业务集成状态必须分开记录。通过 Conda 管理依赖，不混用 uv/pip 覆盖 Conda 管理的 Faiss、NumPy 和 CUDA 库。`environment.yml` 固定直接依赖，`environments/vecstor-linux-64.explicit.txt` 固定全部 Conda 包的构建和 MD5。保留 CPU 后端，GPU 计算使用本机已有设备。

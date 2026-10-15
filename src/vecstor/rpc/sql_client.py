@@ -99,18 +99,29 @@ class SessionClient:
             raise ValueError('nlist must be a positive uint32')
         if type(seed) is not int or not 0 <= seed < 2**64:
             raise ValueError('seed must be a uint64')
+        if device not in ('cpu','gpu') or type(gpu_id) is not int or gpu_id!=0:raise ValueError('Invalid index device')
+        if device=='gpu' and self.get_search_capabilities().get('index_devices_version',0)<1:
+            raise ValueError('Compute service does not support GPU index device controls')
         request = pb.BuildIndexRequest(database_id=self.database_id, table=safe_name(table), seed=seed, device=device, gpu_id=gpu_id)
         if nlist is not None:
             request.nlist = nlist
-        return self._typed_control(self.stub.BuildIndex, request, timeout)
+        result=self._typed_control(self.stub.BuildIndex, request, timeout)
+        if device=='gpu' and (result.get('device')!='gpu' or result.get('gpu_id')!=gpu_id or result.get('state')!='ready'):
+            raise ValueError('Compute service did not acknowledge GPU index device')
+        return result
 
     def list_indexes(self, table=''):
         request = pb.IndexRequest(database_id=self.database_id, table=safe_name(table) if table else '')
         return self._typed_control(self.stub.ListIndexes, request)
 
     def clear_indexes(self, table='', device=''):
+        if device not in ('','cpu','gpu'):raise ValueError('Invalid index device')
+        if device and self.get_search_capabilities().get('index_devices_version',0)<1:
+            raise ValueError('Compute service does not support index device controls')
         request = pb.IndexRequest(database_id=self.database_id, table=safe_name(table) if table else '',device=device)
-        return self._typed_control(self.stub.ClearIndexes, request)
+        result=self._typed_control(self.stub.ClearIndexes, request)
+        if device and result.get('device')!=device:raise ValueError('Compute service did not acknowledge clear device')
+        return result
 
     def execute_stream(self,sql,operation_id=None):
         self.last_was_write=False

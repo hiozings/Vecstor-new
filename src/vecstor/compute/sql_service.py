@@ -91,7 +91,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
     def GetSearchCapabilities(self,request,context):
         return pb.ControlResponse(json_result=json.dumps({'ann':True,'algorithm':'cpu_ivfflat',
             'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':True,'gpu_paths':['search-first'],'gpu_max_search_k':2048,'gpu_max_nprobe':2048,
-            'execution_settings_version':1,'quality_profiles':self.quality_catalog.list()}))
+            'execution_settings_version':1,'index_devices_version':1,'quality_profiles':self.quality_catalog.list()}))
 
     def BuildIndex(self,request,context):
         try:
@@ -122,6 +122,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
             for registry in registries:
                 result=registry.clear(request.database_id,table)
                 for key in output:output[key]+=result[key]
+            if request.device:output['device']=request.device
             return pb.ControlResponse(json_result=json.dumps(output))
         except GpuDataError as error:context.abort(grpc.StatusCode.DATA_LOSS,str(error))
         except ValueError as error: context.abort(grpc.StatusCode.INVALID_ARGUMENT,str(error))

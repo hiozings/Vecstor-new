@@ -130,3 +130,39 @@ w.send_bytes(json.dumps(dict(request_id='wrong',generation=x['generation'],ok=Tr
     with module.GpuWorker() as worker:
         with pytest.raises(RuntimeError,match='identity'):
             worker.submit_clone('key',b'fake',time.monotonic()+5)
+
+
+def test_cancelled_pending_request_releases_queue_capacity_immediately():
+    import os,signal,threading
+    from concurrent.futures import ThreadPoolExecutor
+    from vecstor.index.gpu_worker import GpuWorker
+    with GpuWorker(max_pending=1,scratch_bytes=16*1024**2) as worker,ThreadPoolExecutor(3) as pool:
+        worker.submit_clone('first',fixture_index().serialize(),time.monotonic()+30)
+        pid=worker.pid;os.kill(pid,signal.SIGSTOP);cancelled=threading.Event()
+        try:
+            first=pool.submit(worker.search,'first',np.zeros(2,np.float32),1,1,time.monotonic()+5)
+            time.sleep(.05)
+            second=pool.submit(worker.search,'first',np.zeros(2,np.float32),1,1,time.monotonic()+5,cancelled.is_set)
+            time.sleep(.05);cancelled.set()
+            with pytest.raises(InterruptedError):second.result(timeout=2)
+            third=pool.submit(worker.search,'first',np.zeros(2,np.float32),1,1,time.monotonic()+5)
+            time.sleep(.05)
+            if third.done():third.result() # queue-full is a failure, not pending work
+        finally:os.kill(pid,signal.SIGCONT)
+        assert first.result(timeout=3)['ids'][0]==2**60
+        assert third.result(timeout=3)['ids'][0]==2**60
+
+
+def test_release_reclaims_real_index_vram():
+    import runpy,faiss
+    from vecstor.index.gpu_worker import GpuWorker
+    memory=runpy.run_path('benchmarks/gpu/run.py')['DeviceMemory']()
+    faiss.omp_set_num_threads(1)
+    try:
+        with GpuWorker(scratch_bytes=16*1024**2) as worker:
+            small=fixture_index();worker.submit_clone('warm',small.serialize(),time.monotonic()+30);worker.release('warm')
+            cpu=FaissIndex.build(np.arange(65536,dtype=np.int64),np.random.default_rng(100).random((65536,128),dtype=np.float32),BuildConfig(nlist=16))
+            worker.submit_clone('large',cpu.serialize(),time.monotonic()+30)
+            loaded=memory.used();worker.release('large');released=memory.used()
+            assert loaded-released>24*1024**2,'Large GPU index memory was retained after release'
+    finally:memory.close()
