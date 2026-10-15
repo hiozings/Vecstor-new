@@ -1,6 +1,7 @@
 """Explicit, version-bound index construction; no query-time hidden training."""
 
 import time
+import uuid
 from threading import BoundedSemaphore
 
 import grpc
@@ -14,12 +15,58 @@ from vecstor.rpc.common import RemoteError
 
 
 class IndexManager:
-    def __init__(self,stub,max_bytes=256*1024*1024,max_entries=8):
+    def __init__(self,stub,max_bytes=256*1024*1024,max_entries=8,gpu_options=None):
         self.stub=stub
         self.registry=IndexRegistry(max_bytes,max_entries)
         self.build_slot=BoundedSemaphore(1)
+        from vecstor.index.gpu_worker import GpuWorker
+        from vecstor.index.gpu_registry import GpuRegistry
+        settings=dict(gpu_options or {})
+        gpu_bytes=settings.pop('max_bytes',512*1024**2);gpu_entries=settings.pop('max_entries',8)
+        self.gpu_worker=GpuWorker(**settings)
+        self.gpu_registry=GpuRegistry(self.gpu_worker,gpu_bytes,gpu_entries)
+        self.gpu_build_slot=BoundedSemaphore(1)
+
+    def close(self):self.gpu_worker.close()
 
     def build(self,request,context):
+        if request.device not in ('','cpu','gpu') or request.gpu_id!=0:raise ValueError('Invalid index device')
+        if request.device!='gpu':return dict(self._build_cpu(request,context),device='cpu')
+        if not self.gpu_build_slot.acquire(blocking=False):raise RemoteError(grpc.StatusCode.RESOURCE_EXHAUSTED,'GPU clone already running')
+        io=None;token=None;published=False
+        try:
+            cpu_result=self._build_cpu(request,context)
+            if cpu_result['state']!='ready':raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'GPU requires an IVF index (at least 1024 rows)')
+            deadline=time.monotonic()+min(60,context.time_remaining() or 45)
+            io=LeaseIO(self.stub,request.database_id,request.table,context,deadline,{})
+            lease=io.open()
+            with self.registry.acquire(lease) as cpu:
+                if cpu is None or cpu.key.build_fingerprint!=cpu_result['build_fingerprint']:raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'gpu_build_snapshot_changed; CPU build retained')
+                resident=self.gpu_registry.reactivate(cpu.key,check=io.remaining)
+                if resident:return dict(resident.describe(),state='ready',reused=True)
+                self.gpu_registry.reserve(cpu.handle.byte_size)
+                token=uuid.uuid4().hex;generation=self.gpu_worker.generation
+                stats=self.gpu_worker.submit_clone(token,cpu.handle.serialize(),deadline,cancelled=lambda:not context.is_active())
+                for field in ('row_count','dimension','nlist'):stats.pop(field,None)
+                io.remaining()
+                if generation!=self.gpu_worker.generation:raise ValueError('gpu_worker_generation_changed')
+                from vecstor.index.gpu_backend import GpuIndex
+                handle=GpuIndex(self.gpu_worker,token,cpu.handle,generation)
+                entry=self.gpu_registry.publish(cpu.key,handle,request.table,dict(stats,device='gpu',gpu_id=0,precision='float32',worker_generation=generation),check=io.remaining)
+                published=True
+                return dict(entry.describe(),state='ready',reused=False)
+        except TimeoutError as error:raise RemoteError(grpc.StatusCode.DEADLINE_EXCEEDED,str(error)) from error
+        except InterruptedError as error:raise RemoteError(grpc.StatusCode.CANCELLED,str(error)) from error
+        except ValueError as error:raise RemoteError(grpc.StatusCode.RESOURCE_EXHAUSTED,'GPU clone failed; CPU index retained: '+str(error)) from error
+        finally:
+            try:
+                if token and not published:
+                    try:self.gpu_worker.release(token)
+                    except ValueError:pass
+                if io:io.close()
+            finally:self.gpu_build_slot.release()
+
+    def _build_cpu(self,request,context):
         if not self.build_slot.acquire(blocking=False):
             raise RemoteError(grpc.StatusCode.RESOURCE_EXHAUSTED,'Another index build is running')
         deadline=time.monotonic()+min(60,context.time_remaining() or 45)

@@ -107,8 +107,10 @@ message BuildIndexRequest {
   string table = 2;
   optional uint32 nlist = 3;
   optional uint64 seed = 4;
+  string device = 5;
+  uint32 gpu_id = 6;
 }
-message IndexRequest { string database_id = 1; string table = 2; }
+message IndexRequest { string database_id = 1; string table = 2; string device = 3; }
 service SQLStorage {
   rpc Control(ControlRequest) returns (ControlResponse);
   rpc ExecuteSQL(SQLRequest) returns (stream ResultFrame);

@@ -17,14 +17,15 @@ from vecstor.rpc.sql_codec import encode_result
 
 
 class SQLComputeService(rpc.SQLComputeServicer):
-    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None):
+    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None):
         self.quality_catalog=QualityCatalog.from_document(quality_document)
         self.channel = grpc.insecure_channel(address, options=OPTIONS)
         self.stub = rpc.SQLStorageStub(self.channel)
         self.timeout = timeout
-        self.index_manager=IndexManager(self.stub,max_bytes=index_memory_mib*1024*1024,max_entries=index_max_entries)
+        self.index_manager=IndexManager(self.stub,max_bytes=index_memory_mib*1024*1024,max_entries=index_max_entries,gpu_options=gpu_options)
 
-    def close(self): self.channel.close()
+    def close(self):
+        self.index_manager.close();self.channel.close()
 
     def _remaining(self, context, deadline):
         left = deadline - time.monotonic()
@@ -60,11 +61,10 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 yield from encode_result(output)
             elif plan.vector is not None:
                 options=resolve_execution_options(SearchOptions.from_proto(request.search_options),plan.settings)
-                if options.device=='gpu':raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'gpu_replica_missing')
                 normalized=pb.SQLRequest.FromString(request.SerializeToString())
                 normalized.sql=plan.sql
                 output=execute_vector(self.stub,self.index_manager.registry,normalized,plan.vector,options,
-                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog)
+                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry)
                 output["elapsed_seconds"] = time.monotonic() - started
                 for frame in encode_result(output):
                     self._remaining(context, deadline)
@@ -79,6 +79,8 @@ class SQLComputeService(rpc.SQLComputeServicer):
             context.abort(error.code(), error.details())
         except RemoteError as error:
             context.abort(error.code, error.details)
+        except TimeoutError as error:context.abort(grpc.StatusCode.DEADLINE_EXCEEDED,str(error))
+        except InterruptedError as error:context.abort(grpc.StatusCode.CANCELLED,str(error))
         except ValueError as error:
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(error))
         finally:
@@ -86,7 +88,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
 
     def GetSearchCapabilities(self,request,context):
         return pb.ControlResponse(json_result=json.dumps({'ann':True,'algorithm':'cpu_ivfflat',
-            'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':False,
+            'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':True,'gpu_paths':['search-first'],'gpu_max_search_k':2048,'gpu_max_nprobe':2048,
             'execution_settings_version':1,'quality_profiles':self.quality_catalog.list()}))
 
     def BuildIndex(self,request,context):
@@ -102,7 +104,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
         if not request.database_id: context.abort(grpc.StatusCode.INVALID_ARGUMENT,'Select a database first')
         try:
             table=safe_name(request.table) if request.table else ''
-            output=self.index_manager.registry.list(request.database_id,table)
+            output=[dict(v,device='cpu') for v in self.index_manager.registry.list(request.database_id,table)]+self.index_manager.gpu_registry.list(request.database_id,table)
             return pb.ControlResponse(json_result=json.dumps(output,allow_nan=False))
         except ValueError as error: context.abort(grpc.StatusCode.INVALID_ARGUMENT,str(error))
 
@@ -110,6 +112,11 @@ class SQLComputeService(rpc.SQLComputeServicer):
         if not request.database_id: context.abort(grpc.StatusCode.INVALID_ARGUMENT,'Select a database first')
         try:
             table=safe_name(request.table) if request.table else ''
-            output=self.index_manager.registry.clear(request.database_id,table)
+            if request.device not in ('','cpu','gpu'):raise ValueError('Invalid device')
+            output={'removed':0,'busy':0}
+            registries=([self.index_manager.registry] if request.device=='cpu' else [self.index_manager.gpu_registry] if request.device=='gpu' else [self.index_manager.registry,self.index_manager.gpu_registry])
+            for registry in registries:
+                result=registry.clear(request.database_id,table)
+                for key in output:output[key]+=result[key]
             return pb.ControlResponse(json_result=json.dumps(output))
         except ValueError as error: context.abort(grpc.StatusCode.INVALID_ARGUMENT,str(error))

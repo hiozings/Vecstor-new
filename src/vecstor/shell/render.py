@@ -62,6 +62,8 @@ def render_stream(console, stream, mode, page_size, continue_page, show_plan=Fal
         else:
             actual = plan.get('actual_mode', plan.get('effective_mode', 'unknown'))
             console.print(f"Search result mode: {actual}; fallback: {plan.get('fallback_reason') or 'none'}", markup=False)
+            if 'actual_device' in plan:
+                console.print(f"Device: {plan['actual_device']}; device fallback: {plan.get('device_fallback_reason') or 'none'}; rerank: CPU float64", markup=False)
             if show_plan:
                 console.print(json.dumps(plan, ensure_ascii=False, indent=2), markup=False, highlight=False)
     return complete

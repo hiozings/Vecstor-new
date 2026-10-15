@@ -25,6 +25,11 @@ def main(argv=None):
     compute.add_argument("--batch-rows", type=int, default=256)
     compute.add_argument("--index-memory-mib",type=int,default=256)
     compute.add_argument("--index-max-entries",type=int,default=8)
+    compute.add_argument('--gpu-index-memory-mib',type=int,default=512)
+    compute.add_argument('--gpu-index-max-entries',type=int,default=8)
+    compute.add_argument('--gpu-scratch-mib',type=int,default=128)
+    compute.add_argument('--gpu-memory-margin-mib',type=int,default=256)
+    compute.add_argument('--gpu-max-pending',type=int,default=8)
     compute.add_argument("--quality-profiles",help="Compute-owned snapshot-bound quality JSON (at most 1 MiB)")
     compute.add_argument("--isolate-storage-dir", help="Linux acceptance: deny filesystem access before starting any worker")
     args = parser.parse_args(argv)
@@ -38,12 +43,15 @@ def main(argv=None):
                 with path.open('rb') as source:payload=source.read(1024*1024+1)
                 if len(payload)>1024*1024:raise ValueError('Quality configuration exceeds 1 MiB')
                 quality_document=json.loads(payload)
+            gpu_options=dict(max_bytes=args.gpu_index_memory_mib*1024**2,max_entries=args.gpu_index_max_entries,scratch_bytes=args.gpu_scratch_mib*1024**2,margin_bytes=args.gpu_memory_margin_mib*1024**2,max_pending=args.gpu_max_pending)
             if args.isolate_storage_dir:
                 from vecstor.isolation import restrict_compute_filesystem
-                print(json.dumps(restrict_compute_filesystem(args.isolate_storage_dir)), flush=True)
+                isolation=restrict_compute_filesystem(args.isolate_storage_dir,gpu=True)
+                print(json.dumps(isolation), flush=True)
+                gpu_options['isolation_probe']=[isolation['storage_directory'],isolation['probe_file']]
             from vecstor.compute.service import create_compute_server
             server, port, backend = create_compute_server(args.storage, args.listen, args.timeout, args.batch_rows,
-                                                        args.index_memory_mib,args.index_max_entries,quality_document)
+                                                        args.index_memory_mib,args.index_max_entries,quality_document,gpu_options)
         else:
             if args.data_root:
                 from vecstor.storage.sql_service import create_catalog_server

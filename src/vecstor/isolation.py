@@ -11,7 +11,7 @@ import platform
 import sys
 
 
-def restrict_compute_filesystem(storage_dir):
+def restrict_compute_filesystem(storage_dir, gpu=False):
     if sys.platform != "linux" or platform.machine() not in {"x86_64", "aarch64"}:
         raise RuntimeError("Landlock acceptance requires Linux x86_64/aarch64")
     directory = Path(storage_dir).resolve(strict=True)
@@ -25,6 +25,10 @@ def restrict_compute_filesystem(storage_dir):
     project = Path(__file__).resolve().parents[2]
     allowed = [Path(sys.prefix), project / "src", project / "scripts",
                Path("/usr"), Path("/lib"), Path("/lib64"), Path("/etc"), Path("/dev")]
+    if gpu:
+        # CUDA reads dynamic /proc/self mappings in descendant processes.
+        # Procfs access is read-only; storage path targets remain Landlock-denied.
+        allowed.extend([Path('/proc'),Path('/sys/devices/system/cpu')])
     allowed = sorted({path.resolve() for path in allowed if path.exists()})
     if any(directory.is_relative_to(path) or path.is_relative_to(directory) for path in allowed):
         raise ValueError("Storage directory overlaps the compute runtime allowlist")
@@ -57,6 +61,23 @@ def restrict_compute_filesystem(storage_dir):
                 checked(libc.syscall(445, rules_fd, 1, ctypes.byref(attr), 0), "add path rule")
             finally:
                 os.close(parent_fd)
+        if gpu:
+            # The driver names descendant helper threads through procfs comm.
+            # Existing procfs pseudo-files only: no create/delete rights.
+            procfd=os.open('/proc',os.O_PATH|os.O_CLOEXEC)
+            try:
+                attr=PathRule((1<<1)|(1<<14),procfd)
+                checked(libc.syscall(445,rules_fd,1,ctypes.byref(attr),0),'add CUDA procfs rule')
+            finally:os.close(procfd)
+            # CUDA needs writable character devices, never storage files/directories.
+            for name in ('/dev/null','/dev/nvidia0','/dev/nvidiactl','/dev/nvidia-uvm','/dev/nvidia-uvm-tools'):
+                path=Path(name)
+                if not path.exists():continue
+                fd=os.open(path,os.O_PATH|os.O_CLOEXEC)
+                try:
+                    attr=PathRule((1<<1)|(1<<2),fd)
+                    checked(libc.syscall(445,rules_fd,1,ctypes.byref(attr),0),'add GPU device rule')
+                finally:os.close(fd)
         checked(libc.prctl(38, 1, 0, 0, 0), "no_new_privs")
         checked(libc.syscall(446, rules_fd, 0), "restrict self")
     finally:

@@ -5,6 +5,7 @@ from .render import render_result
 HELP = '''SQL: single-table SELECT, aggregates, CREATE/DROP TABLE, INSERT VALUES,
 UPDATE, DELETE; vector_distance(vector, [0.1, 0.2]) ORDER BY with LIMIT.
 JOIN, CTE, file functions and explicit transactions are unsupported.
+Vector SELECT may end with SETTINGS device='gpu',mode='approx',path='search-first'.
 End SQL with ; then Enter. Multiple statements commit independently.
 .help                     Show this help
 .databases                List managed databases
@@ -20,7 +21,8 @@ End SQL with ; then Enter. Multiple statements commit independently.
                          max-candidates, max-rounds, fallback exact|error
 .search profiles          List calibrated profiles for this database
 .search profile ID|off    Select/disable a snapshot-bound quality profile
-.index build TABLE [--nlist N] [--timeout S] Build CPU index
+.index build TABLE [--nlist N] [--timeout S] [--device cpu|gpu] [--gpu-id 0]
+                         Explicitly build CPU index / GPU replica
 .index list|clear [TABLE] Inspect/clear compute indexes
 .plan on|off              Toggle detailed execution plans
 EXPLAIN [ANALYZE] SELECT  Explain a vector SELECT
@@ -33,7 +35,7 @@ Example: .open demo --create
 def dispatch(shell, text):
     parts = shlex.split(text)
     command, args = parts[0], parts[1:]
-    arities = {'.help': (0,), '.databases': (0,), '.open': (1, 2), '.datasets': (0,), '.import': (2,), '.tables': (0,), '.schema': (0, 1), '.status': (1,), '.mode': (1,), '.timer': (1,), '.clear': (0,), '.quit': (0,), '.search': (0, 1, 2), '.index': (1, 2, 4, 6), '.plan': (1,)}
+    arities = {'.help': (0,), '.databases': (0,), '.open': (1, 2), '.datasets': (0,), '.import': (2,), '.tables': (0,), '.schema': (0, 1), '.status': (1,), '.mode': (1,), '.timer': (1,), '.clear': (0,), '.quit': (0,), '.search': (0, 1, 2), '.index': (1, 2, 4, 6, 8, 10), '.plan': (1,)}
     if command not in arities or len(args) not in arities[command]:
         raise ValueError('Unknown command or invalid arguments. Use .help.')
     client = shell.client
@@ -62,11 +64,11 @@ def dispatch(shell, text):
             options = {}
             for index in range(2, len(args), 2):
                 key = args[index]
-                if key not in ('--nlist', '--timeout') or key in options:
+                if key not in ('--nlist', '--timeout', '--device', '--gpu-id') or key in options:
                     raise ValueError('Usage: .index build TABLE [--nlist N] [--timeout S]')
                 options[key] = args[index + 1]
             result = client.build_index(args[1], nlist=int(options['--nlist']) if '--nlist' in options else None,
-                                        timeout=float(options.get('--timeout', 45)))
+                                        timeout=float(options.get('--timeout', 45)),device=options.get('--device','cpu'),gpu_id=int(options.get('--gpu-id',0)))
         else:
             raise ValueError('Usage: .index build TABLE [--nlist N] [--timeout S] | list/clear [TABLE]')
         render_result(shell.console, result, shell.mode)

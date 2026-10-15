@@ -91,7 +91,7 @@ class SessionClient:
         self.search_options = SearchOptions()
         return self.search_options.to_dict()
 
-    def build_index(self, table, nlist=None, timeout=45, seed=20261013):
+    def build_index(self, table, nlist=None, timeout=45, seed=20261013, device='cpu', gpu_id=0):
         timeout = positive_timeout(timeout)
         if timeout > 60:
             raise ValueError('Index build timeout must be at most 60 seconds')
@@ -99,7 +99,7 @@ class SessionClient:
             raise ValueError('nlist must be a positive uint32')
         if type(seed) is not int or not 0 <= seed < 2**64:
             raise ValueError('seed must be a uint64')
-        request = pb.BuildIndexRequest(database_id=self.database_id, table=safe_name(table), seed=seed)
+        request = pb.BuildIndexRequest(database_id=self.database_id, table=safe_name(table), seed=seed, device=device, gpu_id=gpu_id)
         if nlist is not None:
             request.nlist = nlist
         return self._typed_control(self.stub.BuildIndex, request, timeout)
@@ -108,8 +108,8 @@ class SessionClient:
         request = pb.IndexRequest(database_id=self.database_id, table=safe_name(table) if table else '')
         return self._typed_control(self.stub.ListIndexes, request)
 
-    def clear_indexes(self, table=''):
-        request = pb.IndexRequest(database_id=self.database_id, table=safe_name(table) if table else '')
+    def clear_indexes(self, table='', device=''):
+        request = pb.IndexRequest(database_id=self.database_id, table=safe_name(table) if table else '',device=device)
         return self._typed_control(self.stub.ClearIndexes, request)
 
     def execute_stream(self,sql,operation_id=None):

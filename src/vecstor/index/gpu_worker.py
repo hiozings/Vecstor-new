@@ -53,8 +53,8 @@ class GpuWorker:
         rx,tx=os.pipe();rr,tt=os.pipe()
         try:
             process=subprocess.Popen([sys.executable,'-m','vecstor.index.gpu_worker',str(rx),str(tt),str(self.scratch_bytes),str(self.margin_bytes),json.dumps(self.isolation_probe)],
-                                     pass_fds=(rx,tt),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
-                                     env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1'))
+                                     pass_fds=(rx,tt),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=None,
+                                     env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',CUDA_CACHE_DISABLE='1'))
         except BaseException:
             os.close(tx);os.close(rr);raise
         finally:os.close(rx);os.close(tt)
@@ -186,8 +186,11 @@ def main():
                     gpu=faiss.index_cpu_to_gpu(resource,0,cpu._index,opts)
                     if gpu.ntotal!=cpu.row_count or gpu.d!=cpu.dimension:raise GpuError('gpu_clone_identity_mismatch')
                     indices[key]=gpu
+                    name=ctypes.create_string_buffer(256)
+                    driver=ctypes.CDLL('libcuda.so.1')
+                    device_name=name.value.decode() if driver.cuDeviceGetName(name,256,0)==0 else 'unknown'
                     result={'row_count':cpu.row_count,'dimension':cpu.dimension,'nlist':cpu.nlist,'free_before_bytes':free.value,
-                            'total_vram_bytes':total.value,'worker_pid':os.getpid(),'isolation':isolation}
+                            'total_vram_bytes':total.value,'gpu_model':device_name,'worker_pid':os.getpid(),'isolation':isolation}
                 elif action=='release':
                     indices.pop(key,None);result={}
                 elif action=='search':

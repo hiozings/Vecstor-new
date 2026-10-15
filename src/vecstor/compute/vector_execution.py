@@ -1,6 +1,9 @@
 """Snapshot-safe exact/IVF paths, explicit budgets and measured plans."""
 
 import json
+from contextlib import ExitStack
+from dataclasses import replace
+from vecstor.index.gpu_worker import GpuError
 import time
 
 import grpc
@@ -29,10 +32,11 @@ class TopK:
         self.trace['rerank_ms']+=(time.monotonic()-started)*1000
 
 
-def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None):
+def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None):
     started=time.monotonic()
     trace={'plan_version':1,'requested_mode':options.mode,'requested_path':options.path,
-           'requested_device':options.device,'actual_device':'cpu',
+           'requested_device':options.device,'actual_device':'cpu','device_fallback_reason':None,'device_attempts':[],
+           'gpu_kernel_ms':None,'gpu_h2d_ms':None,'gpu_d2h_ms':None,
            'actual_mode':None,'actual_path':None,'metric':'squared_l2','rerank_precision':'float64',
            'requested_k':plan.limit,'options':options.to_dict(),'rounds':[], 'index':None,
            'fallback_reason':None,'exhaustive_buckets':False,'selector_full_coverage':False,
@@ -42,7 +46,23 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
     trace['counts']['selector_builds']=0
     try:
         lease=io.open();query=query_vector(plan.query_vector,lease.dimension).astype(np.float64)
-        with registry.acquire(lease) as entry:
+        with ExitStack() as pins:
+            cpu_entry=pins.enter_context(registry.acquire(lease))
+            entry=cpu_entry;device='cpu';device_problem=None
+            def device_failure(why):
+                io.remaining()
+                if options.device_fallback!='cpu':raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,why)
+                trace['device_fallback_reason']=why
+                trace['actual_device']='cpu'
+            if options.device=='gpu':
+                gpu_entry=pins.enter_context(gpu_registry.acquire(lease)) if gpu_registry else None
+                device_problem='gpu_path_unsupported' if options.path!='search-first' else 'gpu_replica_missing' if gpu_entry is None else None
+                if not device_problem:entry=gpu_entry;device='gpu'
+                elif explain!='plan':device_failure(device_problem)
+                trace['planned_device']='gpu' if not device_problem else ('cpu' if options.device_fallback=='cpu' else 'error')
+                trace['device_problem']=device_problem
+            trace['actual_device']=device
+
             if entry: trace['index']=entry.describe()
             reason='index_version_mismatch' if registry.has_stale(lease) else 'index_missing'
             trace['index_state']='ready' if entry else reason
@@ -52,6 +72,7 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                 if entry:
                     try:
                         if quality_catalog is None:raise QualityUnavailable('quality_profile_missing')
+                        if device=='gpu':raise QualityUnavailable('quality_profile_backend_mismatch')
                         options,description=quality_catalog.resolve(options.quality_profile_id,entry.key,entry.handle.nlist,
                                                                     entry.handle.row_count,plan,options)
                         trace['quality_profile']=description
@@ -60,7 +81,7 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                         trace['quality_profile'].update(state='unavailable',reason=quality_problem)
                 trace['effective_options']=options.to_dict()
             if explain=='plan':
-                trace.update(actual_mode='not_executed',actual_path='not_executed',
+                trace.update(actual_device='not_executed',actual_mode='not_executed',actual_path='not_executed',
                     planned_path=options.path,planned_mode=options.mode,matched_rows=None)
                 if options.mode=='approx' and (not entry or quality_problem):trace['planned_fallback']=(quality_problem or reason) if options.fallback=='exact' else 'error'
                 output=None
@@ -68,7 +89,8 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                 top=TopK(plan.limit,query,trace)
                 def exact(fallback=None,known=None):
                     nonlocal top
-                    trace.update(actual_mode='exact',actual_path='filter-first',fallback_reason=fallback)
+                    if device=='gpu':device_failure('gpu_exact_fallback_'+str(fallback))
+                    trace.update(actual_device='cpu',actual_mode='exact',actual_path='filter-first',fallback_reason=fallback)
                     top=TopK(plan.limit,query,trace)
                     batches=io.scan(request.sql) if known is None else (known[i:i+io.batch_size] for i in range(0,len(known),io.batch_size))
                     matched=0
@@ -119,7 +141,20 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                         for round_number in range(1,options.max_rounds+1):
                             trace['exhaustive_buckets'] |= nprobe==handle.nlist
                             io.remaining();ann_start=time.monotonic()
-                            _,labels=handle.search(query.astype(np.float32),int(length),int(nprobe),prepared_selector=selector,statistics=trace)
+                            if device=='gpu':
+                                trace['device_attempts'].append({'device':'gpu','L':length,'nprobe':nprobe})
+                                try:
+                                    _,labels=handle.search(query.astype(np.float32),int(length),int(nprobe),deadline=deadline,cancelled=lambda:not context.is_active(),statistics=trace)
+                                except GpuError as error:
+                                    why=str(error)
+                                    device_failure(why)
+                                    if cpu_entry is None:
+                                        fallback('index_missing',allowed_rows);stop='device_fallback';break
+                                    if options.quality_profile_id is not None:raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'quality_profile_backend_mismatch')
+                                    handle=cpu_entry.handle;device='cpu';trace['index']=cpu_entry.describe()
+                                    _,labels=handle.search(query.astype(np.float32),int(length),int(nprobe),statistics=trace)
+                            else:
+                                _,labels=handle.search(query.astype(np.float32),int(length),int(nprobe),prepared_selector=selector,statistics=trace)
                             trace['faiss_search_ms']+=(time.monotonic()-ann_start)*1000
                             io.remaining()
                             labels=[int(i) for i in labels if i!=-1]
@@ -142,7 +177,7 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                             if next_length==length and next_nprobe==nprobe:stop='no_progress';break
                             length,nprobe=next_length,next_nprobe
                         trace['stop_reason']=stop
-                        if matched<plan.limit:fallback(stop,allowed_rows)
+                        if matched<plan.limit and stop!='device_fallback':fallback(stop,allowed_rows)
                 trace['returned_rows']=len(top.rows)
                 types={'id':'BIGINT','category':'VARCHAR','timestamp':'BIGINT','value':'DOUBLE','vector':f'FLOAT[{lease.dimension}]','distance':'DOUBLE'}
                 output={'columns':[{'name':out,'type':types[source]} for out,source in plan.projection],
