@@ -2,6 +2,7 @@
 
 import json
 import uuid
+import time
 from dataclasses import replace
 
 import grpc
@@ -16,7 +17,7 @@ from vecstor.rpc.sql_codec import decode_frame
 
 
 class SessionClient:
-    def __init__(self, address, timeout=15):
+    def __init__(self, address, timeout=15, cache_query_capabilities=True):
         self.address, self.timeout = address, positive_timeout(timeout)
         self.database_id = self.database_name = ""
         self.last_operation_id = ""
@@ -24,6 +25,10 @@ class SessionClient:
         self.search_options = SearchOptions()
         self.last_search_mode = None
         self._quality_supported=None
+        self.cache_query_capabilities=cache_query_capabilities
+        self._query_caps=None;self._caps_endpoint=None
+        self._control_rpc_calls=0;self._control_payload_bytes=0
+        self.last_query_stats=None
         self.channel = grpc.insecure_channel(address,options=OPTIONS)
         self.stub = rpc.SQLComputeStub(self.channel)
 
@@ -47,9 +52,11 @@ class SessionClient:
         return self._control("import",source=source,table=table,operation_id=self.last_operation_id)
 
     def _typed_control(self, method, request, timeout=None):
+        self._control_rpc_calls+=1;self._control_payload_bytes+=request.ByteSize()
         call = method.future(request, timeout=self.timeout if timeout is None else timeout)
         try:
-            return json.loads(call.result().json_result)
+            response=call.result();self._control_payload_bytes+=response.ByteSize()
+            return json.loads(response.json_result)
         except grpc.RpcError as error:
             raise RemoteError(error.code(), error.details()) from error
         finally:
@@ -57,6 +64,19 @@ class SessionClient:
 
     def get_search_capabilities(self):
         return self._typed_control(self.stub.GetSearchCapabilities, Empty())
+
+    def _query_capabilities(self):
+        endpoint=(self.address,id(self.stub))
+        if self.cache_query_capabilities and self._caps_endpoint==endpoint and self._query_caps is not None:
+            return self._query_caps
+        caps=self.get_search_capabilities()
+        if not isinstance(caps,dict):raise ValueError('Invalid compute capabilities')
+        if self.cache_query_capabilities and isinstance(caps.get('server_instance_id'),str) and caps['server_instance_id']:
+            self._query_caps=caps;self._caps_endpoint=endpoint
+        return caps
+
+    def _invalidate_query_capabilities(self):
+        self._query_caps=None;self._caps_endpoint=None;self._quality_supported=None
 
     def list_quality_profiles(self):
         caps=self.get_search_capabilities()
@@ -124,6 +144,7 @@ class SessionClient:
         return result
 
     def execute_stream(self,sql,operation_id=None):
+        preflight_started=time.perf_counter();control_before=self._control_rpc_calls;bytes_before=self._control_payload_bytes
         self.last_was_write=False
         self.last_search_mode = None
         plan=classify_statement(sql)
@@ -133,18 +154,26 @@ class SessionClient:
         effective=resolve_execution_options(self.search_options,plan.settings) if plan.kind=='vector' else self.search_options
         needs_device_ack=bool(plan.settings) or effective.device=='gpu'
         if plan.kind == 'vector':
-            if needs_device_ack and self.get_search_capabilities().get('execution_settings_version',0)<1:
+            caps=self._query_capabilities() if needs_device_ack or effective.quality_profile_id else None
+            if needs_device_ack and (type(caps.get('execution_settings_version')) is not int or caps['execution_settings_version']<1):
+                self._invalidate_query_capabilities()
                 raise ValueError('Compute service does not support SQL device settings')
-            if self.search_options.quality_profile_id is not None and self._quality_supported is not True:
-                self.list_quality_profiles()
+            if effective.quality_profile_id and not isinstance(caps.get('quality_profiles'),list):
+                self._invalidate_query_capabilities()
+                raise ValueError('Compute service does not support quality profiles')
             request.search_options.CopyFrom(effective.to_proto())
             self.last_search_mode = effective.mode
+        client_stats={'preflight_ms':(time.perf_counter()-preflight_started)*1000,
+                      'control_rpc_calls':self._control_rpc_calls-control_before,
+                      'control_payload_bytes':self._control_payload_bytes-bytes_before,'execute_rpc_calls':1}
         def events():
+            execution_started=time.perf_counter();payload_bytes=request.ByteSize()
             call=self.stub.ExecuteSQL(request,timeout=self.timeout)
             schema=complete=False
             width=0
             try:
                 for frame in call:
+                    payload_bytes+=frame.ByteSize()
                     event=decode_frame(frame)
                     if complete: raise ValueError("Unexpected result after completion")
                     if event["kind"]=="schema":
@@ -167,13 +196,23 @@ class SessionClient:
                             quality=execution.get('quality_profile') or {}
                             if quality.get('requested_id')!=profile_id or (execution.get('actual_mode')=='approx' and quality.get('state')!='applied'):
                                 raise ValueError('Compute service did not acknowledge/apply the quality profile')
+                        execution=event.get('execution_plan')
+                        if execution is not None:
+                            if self._query_caps and execution.get('server_instance_id')!=self._query_caps.get('server_instance_id'):
+                                self._invalidate_query_capabilities()
+                            client_stats.update(execute_rpc_ms=(time.perf_counter()-execution_started)*1000,execute_payload_bytes=payload_bytes)
+                            execution['client']=dict(client_stats)
+                        self.last_query_stats=dict(client_stats)
                         complete=True
                         if event.get("selected_database_id"):
                             self.database_id=event["selected_database_id"]
                             self.database_name=event["selected_database_name"]
                     yield event
                 if not schema or not complete: raise ValueError("Incomplete result stream")
-            except grpc.RpcError as error: raise RemoteError(error.code(),error.details()) from error
+            except grpc.RpcError as error:
+                self._invalidate_query_capabilities();raise RemoteError(error.code(),error.details()) from error
+            except ValueError:
+                self._invalidate_query_capabilities();raise
             finally: call.cancel()
         return events()
 

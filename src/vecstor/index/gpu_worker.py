@@ -29,6 +29,7 @@ class Job:
     cancelled: object
     generation: int
     done: threading.Event=field(default_factory=threading.Event)
+    enqueued_at: float=field(default_factory=time.perf_counter)
     active: bool=False
     abandoned: bool=False
     result: object=None
@@ -79,7 +80,7 @@ class GpuWorker:
                 with self._condition:
                     while not self._queue and not self._closed:self._condition.wait()
                     if not self._queue and self._closed:return
-                    job=self._queue.popleft()
+                    job=self._queue.popleft();dispatched=time.perf_counter()
                 try:
                     with self._lock:
                         if self._closed:raise GpuError('gpu_worker_closed')
@@ -111,7 +112,7 @@ class GpuWorker:
                         raise GpuError(response.get('error','gpu_native_error'))
                     with self._lock:
                         if job.generation!=self.generation:raise GpuError('gpu_worker_generation_changed')
-                        job.result=response['result']
+                        job.result=dict(response['result'],worker_queue_ms=(dispatched-job.enqueued_at)*1000,worker_roundtrip_ms=(time.perf_counter()-dispatched)*1000)
                 except GpuDataError as error:
                     with self._lock:
                         if process is self._process:self.reset()

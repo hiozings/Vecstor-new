@@ -115,18 +115,20 @@ def test_warm_client_rejects_old_service_that_ignores_profile():
     class Legacy(rpc.SQLComputeServicer):
         legacy=False
         def GetSearchCapabilities(self,request,context):
-            value={'ann':True}
+            value={'ann':True,'server_instance_id':'initial'}
             if not self.legacy:value['quality_profiles']=[{'profile_id':'tested','database_id':'db'}]
             return pb.ControlResponse(json_result=json.dumps(value))
         def ExecuteSQL(self,request,context):
-            yield from encode_result({'columns':[{'name':'id','type':'BIGINT'}],'rows':[[1]],
-                                      'execution_plan':{'actual_mode':'approx'}})
+            plan={'actual_mode':'approx','server_instance_id':'initial'}
+            if not self.legacy:plan['quality_profile']={'requested_id':'tested','state':'applied'}
+            yield from encode_result({'columns':[{'name':'id','type':'BIGINT'}],'rows':[[1]],'execution_plan':plan})
     backend=Legacy();server=grpc.server(ThreadPoolExecutor(1));rpc.add_SQLComputeServicer_to_server(backend,server)
     port=server.add_insecure_port('127.0.0.1:0');server.start()
     try:
         with SessionClient(f'127.0.0.1:{port}') as client:
-            client.database_id='db';client.list_quality_profiles();backend.legacy=True
+            client.database_id='db'
             client.search_options=SearchOptions(mode='approx',quality_profile_id='tested')
+            client.execute(SQL);backend.legacy=True
             with pytest.raises(ValueError,match='acknowledge'):client.execute(SQL)
     finally:server.stop(0).wait()
 

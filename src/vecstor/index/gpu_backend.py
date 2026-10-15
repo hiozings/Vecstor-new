@@ -37,7 +37,14 @@ class GpuIndex:
             raise GpuDataError('Invalid GPU response rows')
         positions=np.searchsorted(self.ids,ids)
         if np.any(positions>=len(self.ids)) or not np.array_equal(self.ids[positions],ids):raise GpuDataError('GPU returned unknown snapshot IDs')
+        for name in ('worker_queue_ms','worker_roundtrip_ms'):
+            if name in result:
+                value=result[name]
+                if type(value) not in (int,float) or not np.isfinite(value) or value<0:raise GpuDataError('Invalid GPU transport timing')
         if statistics is not None:
+            if 'worker_queue_ms' in result:
+                statistics['gpu_queue_ms']=statistics.get('gpu_queue_ms',0)+result['worker_queue_ms']
+                statistics['gpu_ipc_ms']=statistics.get('gpu_ipc_ms',0)+max(0,result['worker_roundtrip_ms']-cost)
             statistics['gpu_host_ms']=statistics.get('gpu_host_ms',0)+result['gpu_host_ms']
             statistics['gpu_ipc_queue_ms']=statistics.get('gpu_ipc_queue_ms',0)+max(0,(time.perf_counter()-started)*1000-result['gpu_host_ms'])
         return distances,ids

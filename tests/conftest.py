@@ -5,7 +5,7 @@ import subprocess
 import sys
 import pytest
 
-GPU_FILES={'test_gpu_worker.py','test_gpu_execution.py','test_gpu_shell.py','test_gpu_quality_rpc.py','test_gpu_calibration.py','test_gpu_acceptance.py','test_gpu_benchmark.py'}
+GPU_FILES={'test_gpu_sessions.py','test_gpu_worker.py','test_gpu_execution.py','test_gpu_shell.py','test_gpu_quality_rpc.py','test_gpu_calibration.py','test_gpu_acceptance.py','test_gpu_benchmark.py'}
 
 
 @lru_cache(maxsize=1)

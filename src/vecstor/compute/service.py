@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import grpc
 
 from vecstor.compute.engine import RemoteEngine
+from vecstor.rpc.timing import AdmissionTiming
 from vecstor.compute.sql_service import SQLComputeService
 from vecstor.data import DataError
 from vecstor.query.parser import QueryError
@@ -40,7 +41,7 @@ class ComputeService(rpc.ComputeServicer):
 
 def create_compute_server(storage_address, address, timeout=10, batch_rows=DEFAULT_BATCH_ROWS, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None):
     backend = ComputeService(storage_address, timeout, batch_rows,index_memory_mib,index_max_entries,quality_document,gpu_options)
-    server = grpc.server(ThreadPoolExecutor(max_workers=4), options=OPTIONS)
+    server = grpc.server(ThreadPoolExecutor(max_workers=4), options=OPTIONS,interceptors=[AdmissionTiming()])
     rpc.add_ComputeServicer_to_server(backend, server)
     sql_rpc.add_SQLComputeServicer_to_server(backend.sql, server)
     port = server.add_insecure_port(address)

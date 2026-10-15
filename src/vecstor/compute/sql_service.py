@@ -2,6 +2,7 @@
 
 import json
 import time
+import uuid
 
 import grpc
 
@@ -19,6 +20,7 @@ from vecstor.rpc.sql_codec import encode_result
 
 class SQLComputeService(rpc.SQLComputeServicer):
     def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None):
+        self.server_instance_id=uuid.uuid4().hex
         self.quality_catalog=QualityCatalog.from_document(quality_document)
         self.channel = grpc.insecure_channel(address, options=OPTIONS)
         self.stub = rpc.SQLStorageStub(self.channel)
@@ -66,6 +68,9 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 normalized.sql=plan.sql
                 output=execute_vector(self.stub,self.index_manager.registry,normalized,plan.vector,options,
                                       context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry)
+                output['execution_plan']['server_instance_id']=self.server_instance_id
+                output['execution_plan']['server_admission_ms']=getattr(context,'vecstor_admission_ms',None)
+                if plan.explain:output['rows']=[[json.dumps(output['execution_plan'],ensure_ascii=False,allow_nan=False)]]
                 output["elapsed_seconds"] = time.monotonic() - started
                 for frame in encode_result(output):
                     self._remaining(context, deadline)
@@ -89,7 +94,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
             if stream is not None: stream.cancel()
 
     def GetSearchCapabilities(self,request,context):
-        return pb.ControlResponse(json_result=json.dumps({'ann':True,'algorithm':'cpu_ivfflat',
+        return pb.ControlResponse(json_result=json.dumps({'server_instance_id':self.server_instance_id,'ann':True,'algorithm':'cpu_ivfflat',
             'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':True,'gpu_paths':['search-first'],'gpu_max_search_k':2048,'gpu_max_nprobe':2048,
             'execution_settings_version':1,'index_devices_version':1,'quality_profiles':self.quality_catalog.list()}))
 

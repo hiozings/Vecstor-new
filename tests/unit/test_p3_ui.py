@@ -63,7 +63,8 @@ class Stream(list):
 
 
 def client_fixture(ann=True):
-    client = SessionClient.__new__(SessionClient)
+    client = SessionClient("127.0.0.1:1")
+    client.channel.close()  # All transport calls below use the local fake stub.
     client.timeout, client.database_id, client.database_name = 15, 'db', 'demo'
     client.search_options = SearchOptions()
     client.stub = SimpleNamespace(Control=Method({'columns':[], 'rows':[]}), GetSearchCapabilities=Method({'ann':ann}), BuildIndex=Method({'status':'ready'}), ListIndexes=Method([]), ClearIndexes=Method({'cleared':1}))
