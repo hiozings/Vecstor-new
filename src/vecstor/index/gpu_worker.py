@@ -96,12 +96,16 @@ class GpuWorker:
                     sender.send_bytes(json.dumps(envelope).encode())
                     if job.payload is not None:sender.send_bytes(job.payload)
                     try:response=json.loads(receiver.recv_bytes(MAX_FRAME))
+                    except OSError as error:
+                        if str(error)=='bad message length':raise GpuDataError('Invalid GPU frame length') from error
+                        raise
                     except (json.JSONDecodeError,UnicodeDecodeError) as error:raise GpuDataError('Malformed GPU response') from error
                     if not isinstance(response,dict):raise GpuDataError('Malformed GPU response')
-                    if response.get('request_id')!=envelope['request_id'] or response.get('generation')!=job.generation:
+                    if type(response.get('generation')) is not int or type(response.get('request_id')) is not str or response.get('request_id')!=envelope['request_id'] or response.get('generation')!=job.generation:
                         raise GpuDataError('GPU response identity mismatch')
                     if response.get('ok') is True and not isinstance(response.get('result'),dict):raise GpuDataError('Malformed GPU result')
                     if response.get('ok') is not True:
+                        if not isinstance(response.get('error'),str):raise GpuDataError('Malformed GPU failure detail')
                         if response.get('error_kind')=='data':raise GpuDataError(response.get('error','GPU data corruption'))
                         if response.get('ok') is not False or response.get('error_kind')!='device':raise GpuDataError('Malformed GPU failure')
                         raise GpuError(response.get('error','gpu_native_error'))
@@ -157,6 +161,9 @@ class GpuWorker:
         if type(nprobe) is not int or not 1<=nprobe<=2048:raise GpuError('gpu_nprobe_limit')
         if generation is not None and generation!=self.generation:raise GpuError('gpu_worker_generation_changed')
         return self._call({'action':'search','key':key,'query':list(map(float,query)),'count':count,'nprobe':nprobe},deadline=deadline,cancelled=cancelled)
+
+    def verify_replica(self,key,deadline,cancelled=lambda:False):
+        return self._call({'action':'describe','key':key},deadline=deadline,cancelled=cancelled)
 
     def release(self,key):
         if self.pid is not None:return self._call({'action':'release','key':key})
@@ -220,6 +227,9 @@ def main():
             device_name=name.value.decode() if driver.cuDeviceGetName(name,256,0)==0 else 'unknown'
             result={'row_count':cpu.row_count,'dimension':cpu.dimension,'nlist':cpu.nlist,'free_before_bytes':free.value,
                     'total_vram_bytes':total.value,'gpu_model':device_name,'worker_pid':os.getpid(),'isolation':isolation}
+        elif action=='describe':
+            if key not in indices:raise GpuError('gpu_replica_missing')
+            gpu=indices[key];result={'row_count':int(gpu.ntotal),'dimension':int(gpu.d),'nlist':int(gpu.nlist)}
         elif action=='release':
             indices.pop(key,None);result={}
         elif action=='search':

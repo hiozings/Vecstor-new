@@ -1,6 +1,7 @@
 """Parent-side immutable GPU replica handle; native resources stay in worker."""
 from dataclasses import dataclass
 import time
+import math
 import numpy as np
 from .gpu_worker import GpuError,GpuDataError
 
@@ -21,6 +22,14 @@ class GpuIndex:
     def search(self,query,count,nprobe,*,deadline,cancelled=lambda:False,statistics=None,**kwargs):
         started=time.perf_counter()
         result=self.worker.search(self.token,query,count,nprobe,deadline,cancelled,self.worker_generation)
+        if not isinstance(result,dict):raise GpuDataError('Malformed GPU result')
+        raw_ids=result.get('ids');raw_distances=result.get('distances');cost=result.get('gpu_host_ms')
+        if not isinstance(raw_ids,list) or any(type(x) is not int or not 0<=x<2**63 for x in raw_ids):
+            raise GpuDataError('GPU candidate IDs must be nonnegative int64 integers')
+        if not isinstance(raw_distances,list) or any(type(x) not in (int,float) for x in raw_distances):raise GpuDataError('Malformed GPU distances')
+        try:valid_cost=type(cost) in (int,float) and math.isfinite(cost) and cost>=0
+        except OverflowError:valid_cost=False
+        if not valid_cost:raise GpuDataError('Invalid GPU timing')
         try:
             ids=np.asarray(result['ids'],dtype=np.int64);distances=np.asarray(result['distances'],dtype=np.float32)
         except (KeyError,TypeError,ValueError,OverflowError) as error:raise GpuDataError('Malformed GPU candidate rows') from error

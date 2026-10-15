@@ -43,7 +43,17 @@ class IndexManager:
             with self.registry.acquire(lease) as cpu:
                 if cpu is None or cpu.key.build_fingerprint!=cpu_result['build_fingerprint']:raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'gpu_build_snapshot_changed; CPU build retained')
                 resident=self.gpu_registry.reactivate(cpu.key,check=io.remaining)
-                if resident:return dict(resident.describe(),state='ready',reused=True)
+                if resident:
+                    from vecstor.index.gpu_worker import GpuError,GpuDataError
+                    try:
+                        actual=self.gpu_worker.verify_replica(resident.handle.token,deadline,cancelled=lambda:not context.is_active())
+                        if any(actual.get(name)!=getattr(resident.handle,name) for name in ('row_count','dimension','nlist')):
+                            raise GpuDataError('GPU replica metadata mismatch')
+                        return dict(resident.describe(),state='ready',reused=True)
+                    except GpuError:
+                        # Explicit build may recover a dead/missing native replica.
+                        self.gpu_worker.reset()
+
                 self.gpu_registry.reserve(cpu.handle.byte_size)
                 token=uuid.uuid4().hex;generation=self.gpu_worker.generation
                 stats=self.gpu_worker.submit_clone(token,cpu.handle.serialize(),deadline,cancelled=lambda:not context.is_active())

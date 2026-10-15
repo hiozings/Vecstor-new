@@ -166,3 +166,21 @@ def test_release_reclaims_real_index_vram():
             loaded=memory.used();worker.release('large');released=memory.used()
             assert loaded-released>24*1024**2,'Large GPU index memory was retained after release'
     finally:memory.close()
+
+
+@pytest.mark.parametrize('failure',['generation_type','frame_length'])
+def test_malformed_reply_header_or_frame_is_data_loss(monkeypatch,failure):
+    import vecstor.index.gpu_worker as module
+    original=module.subprocess.Popen
+    peer="""import sys,json
+from multiprocessing.connection import Connection
+r=Connection(int(sys.argv[1]),readable=True,writable=False);w=Connection(int(sys.argv[2]),readable=False,writable=True)
+x=json.loads(r.recv_bytes());r.recv_bytes()
+body=json.dumps(dict(request_id=x['request_id'],generation=True,ok=True,result={})).encode()
+w.send_bytes(body)
+"""
+    if failure=='frame_length':
+        monkeypatch.setattr(module,'MAX_FRAME',1024);peer=peer.replace('w.send_bytes(body)',"w.send_bytes(b'x'*2048)")
+    monkeypatch.setattr(module.subprocess,'Popen',lambda command,**kwargs:original([module.sys.executable,'-c',peer,*command[3:]],**kwargs))
+    with module.GpuWorker() as worker:
+        with pytest.raises(module.GpuDataError):worker.submit_clone('x',b'index',time.monotonic()+5)

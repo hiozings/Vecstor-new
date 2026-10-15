@@ -118,3 +118,53 @@ def test_explicit_build_recovers_dead_worker_without_a_probe_query(tmp_path):
         rebuilt=c.build_index('items',nlist=1,device='gpu')
         assert rebuilt['worker_pid']!=first['worker_pid'] and rebuilt['reused'] is False
         assert c.execute(SQL+GPU)['execution_plan']['actual_device']=='gpu'
+
+
+@pytest.mark.parametrize('matches',[0,1,9])
+def test_gpu_complete_snapshot_returns_all_legal_rows_without_cpu_fallback(tmp_path,matches):
+    with servers(tmp_path) as (address,_),SessionClient(address) as c:
+        c.open_database('demo',True);save_dataset(generate_dataset(1024,3),tmp_path/'imports/a.npz');c.import_dataset('a.npz','items');c.build_index('items',nlist=1,device='gpu')
+        sql=SQL.replace('value<1000',f'value<{matches}')
+        result=c.execute(sql+GPU+",candidates=1024,max_candidates=1024,max_rounds=1,fallback='error'")
+        assert result['rows']==c.execute(sql)['rows']
+        plan=result['execution_plan']
+        assert plan['actual_device']=='gpu' and plan['actual_mode']=='approx'
+        assert plan['candidate_space_complete'] is True and plan['stop_reason']=='candidate_space_exhausted'
+        assert plan['counts']['scan_metadata_calls']==0
+
+
+def test_full_nprobe_does_not_prove_full_candidate_coverage(tmp_path):
+    with servers(tmp_path) as (address,_),SessionClient(address) as c:
+        c.open_database('demo',True);save_dataset(generate_dataset(1024,3),tmp_path/'imports/a.npz');c.import_dataset('a.npz','items');c.build_index('items',nlist=1,device='gpu')
+        with pytest.raises(ValueError):c.execute(SQL.replace('value<1000','value<0')+GPU+",candidates=64,max_candidates=64,max_rounds=1,fallback='error'")
+
+
+def test_cpu_fallback_resolves_implicit_probe_against_cpu_index(tmp_path):
+    with servers(tmp_path) as (address,_),SessionClient(address) as c:
+        c.open_database('demo',True);save_dataset(generate_dataset(4096,3),tmp_path/'imports/a.npz');c.import_dataset('a.npz','items')
+        c.build_index('items',nlist=16,device='gpu');c.build_index('items',nlist=1,device='cpu')
+        result=c.execute(SQL+" SETTINGS device='gpu',mode='approx',path='search-first',device_fallback='cpu',candidates=3000")
+        assert result['execution_plan']['actual_device']=='cpu'
+        assert result['rows']==c.execute(SQL)['rows']
+        assert result['execution_plan']['rounds'][0]['nprobe']==1
+
+
+def test_explain_does_not_advertise_forbidden_gpu_to_cpu_exact_fallback(tmp_path):
+    with servers(tmp_path) as (address,_),SessionClient(address) as c:
+        c.open_database('demo',True);save_dataset(generate_dataset(1024,3),tmp_path/'imports/a.npz');c.import_dataset('a.npz','items');c.build_index('items',nlist=1,device='gpu')
+        sql=SQL+GPU+",quality_profile_id='missing'"
+        explained=c.execute('EXPLAIN '+sql)['execution_plan']
+        assert explained['planned_fallback']=='error'
+        with pytest.raises(ValueError):c.execute(sql)
+
+
+def test_gpu_reuse_verifies_native_replica_when_liveness_metadata_is_stale(tmp_path,monkeypatch):
+    import os,signal,time
+    from vecstor.index.gpu_worker import GpuWorker
+    with servers(tmp_path) as (address,_),SessionClient(address) as c:
+        c.open_database('demo',True);save_dataset(generate_dataset(1024,3),tmp_path/'imports/a.npz');c.import_dataset('a.npz','items')
+        first=c.build_index('items',nlist=1,device='gpu');os.kill(first['worker_pid'],signal.SIGKILL)
+        monkeypatch.setattr(GpuWorker,'generation',property(lambda w:w._generation))
+        rebuilt=c.build_index('items',nlist=1,device='gpu')
+        assert not rebuilt['reused'] and rebuilt['worker_pid']!=first['worker_pid']
+        assert c.execute(SQL+GPU)['execution_plan']['actual_device']=='gpu'

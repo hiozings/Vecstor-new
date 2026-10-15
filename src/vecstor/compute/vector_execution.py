@@ -39,7 +39,7 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
            'gpu_kernel_ms':None,'gpu_h2d_ms':None,'gpu_d2h_ms':None,
            'actual_mode':None,'actual_path':None,'metric':'squared_l2','rerank_precision':'float64',
            'requested_k':plan.limit,'options':options.to_dict(),'rounds':[], 'index':None,
-           'fallback_reason':None,'exhaustive_buckets':False,'selector_full_coverage':False,
+           'fallback_reason':None,'candidate_space_complete':False,'exhaustive_buckets':False,'selector_full_coverage':False,
            'selector_build_ms':0.,'native_search_ms':0.,'faiss_search_ms':0.0,'rerank_ms':0.0,
            'metadata_rows_scanned':None,'byte_accounting':'storage_protobuf_payloads'}
     io=LeaseIO(stub,request.database_id,plan.table,context,deadline,trace)
@@ -90,7 +90,9 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
             if explain=='plan':
                 trace.update(actual_device='not_executed',actual_mode='not_executed',actual_path='not_executed',
                     planned_path=options.path,planned_mode=options.mode,matched_rows=None)
-                if options.mode=='approx' and (not entry or quality_problem):trace['planned_fallback']=(quality_problem or reason) if options.fallback=='exact' else 'error'
+                if options.mode=='approx' and (not entry or quality_problem):
+                    forbidden=options.device=='gpu' and options.device_fallback!='cpu'
+                    trace['planned_fallback']=(quality_problem or reason) if options.fallback=='exact' and not forbidden else 'error'
                 output=None
             else:
                 top=TopK(plan.limit,query,trace)
@@ -159,6 +161,7 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                                         fallback('index_missing',allowed_rows);stop='device_fallback';break
                                     if options.quality_profile_id is not None:raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'quality_profile_backend_mismatch')
                                     handle=cpu_entry.handle;device='cpu';trace['index']=cpu_entry.describe()
+                                    if options.nprobe is None:nprobe=min(8,handle.nlist)
                                     _,labels=handle.search(query.astype(np.float32),int(length),int(nprobe),statistics=trace)
                             else:
                                 _,labels=handle.search(query.astype(np.float32),int(length),int(nprobe),prepared_selector=selector,statistics=trace)
@@ -178,13 +181,15 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                             trace['counts']['candidates_checked']=len(seen)
                             trace['rounds'].append({'round':round_number,'L':length,'nprobe':nprobe,'new_candidates':len(new),
                                 'unique_candidates':len(seen),'matched_candidates':matched})
+                            trace['candidate_space_complete']=len(seen)==limit_pool
+                            if trace['candidate_space_complete']:stop='candidate_space_exhausted';break
                             if matched>=plan.limit:stop='enough_candidates';break
                             if len(seen)>=budget:stop='candidate_budget';break
                             next_length=min(budget,length*2);next_nprobe=min(handle.nlist,nprobe*2)
                             if next_length==length and next_nprobe==nprobe:stop='no_progress';break
                             length,nprobe=next_length,next_nprobe
                         trace['stop_reason']=stop
-                        if matched<plan.limit and stop!='device_fallback':fallback(stop,allowed_rows)
+                        if matched<plan.limit and stop not in ('device_fallback','candidate_space_exhausted'):fallback(stop,allowed_rows)
                 trace['returned_rows']=len(top.rows)
                 types={'id':'BIGINT','category':'VARCHAR','timestamp':'BIGINT','value':'DOUBLE','vector':f'FLOAT[{lease.dimension}]','distance':'DOUBLE'}
                 output={'columns':[{'name':out,'type':types[source]} for out,source in plan.projection],

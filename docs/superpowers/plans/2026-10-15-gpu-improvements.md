@@ -28,7 +28,7 @@
 4. 热会话/新连接、后端公平对比/产品真实体验必须分别报告；不要把控制面开销当kernel性能。
 5. GPU覆盖扩展不能通过截断预算、污染留出集或计算CPU回退结果达成。
 
-## G0：修正边界语义与完整性校验（第一轮，必须先做）
+## Task 1：G0 修正边界语义与完整性校验（第一轮，必须先做）
 
 **Files:** compute/vector_execution.py、index/gpu_backend.py、gpu_worker.py；tests/integration/test_gpu_execution.py、tests/unit/test_gpu_native_protocol.py。
 **Interfaces:** 执行计划新增 `candidate_space_complete` 与明确的穷尽停止原因；GPU响应解码统一产生严格类型的候选或GpuDataError。
@@ -40,7 +40,7 @@
 - [ ] 定向复现CPU/GPU不同nlist的回退、EXPLAIN计划与实际策略、清理/期限交错。确认缺陷才修，不将猜测直接写成已修复事项。
 - [ ] 验收：两项已复现问题消失，原不完整大表请求仍失败；完整回归及真实GPU/隔离通过。更新错误说明与日志。
 
-## G1：建立可信成本基线并减少重复控制面调用（第一轮）
+## Task 2：G1 建立可信成本基线并减少重复控制面调用（第一轮）
 
 **Files:** rpc/sql_client.py、compute/sql_service.py、compute/service.py、index/gpu_worker.py、benchmarks/gpu/run.py；新增针对会话复用与计时口径的测试。
 **Interfaces:** 能力缓存仅用于可安全缓存的只读查询；响应设备/质量确认保留。计时字段明确client-preflight、server-admission（能可靠测得时）、GPU排队/IPC/执行及数据RPC，不强行填未知值。
@@ -52,7 +52,7 @@
 - [ ] 选代表性的规模/选择率/K/并发1、4、8组，每组至少3次独立重复、累计≥1500请求；冷克隆、热查询分开，记录种子、机器负载、置信区间。
 - [ ] 验收：原始与新基线口径可解释；用证据确认主要耗时后进入G2，不先假定GPU队列或内核是瓶颈。
 
-## G2：有界合批与数据路径优化（第一轮，按G1结论选择）
+## Task 3：G2 有界合批与数据路径优化（第一轮，按G1结论选择）
 
 **Files:** index/gpu_worker.py、gpu_backend.py、compute/vector_execution.py；如RPC瓶颈确认，再改lease_io.py、storage/sql_service.py及v2 proto并生成代码。
 **Interfaces:** 一个批任务带多个独立request_id；按完整IndexKey、worker generation、device、precision、nprobe和候选L分组。初始探索batch上限1/4/8，等待窗口0/0.5/1ms，可单独关闭。
