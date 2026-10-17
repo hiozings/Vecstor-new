@@ -2,7 +2,7 @@
 
 本文件适用于整个项目，供团队成员与开发代理共同遵循。记录项目实施计划、目录结构、技术栈和开发约束；后续开发应同步维护，避免文档与实际实现脱节。
 
-最后更新：2026-10-15。
+最后更新：2026-10-16。
 
 ## 1. 项目背景与当前状态
 
@@ -117,6 +117,8 @@ GPU ANN 已按计划接入：SQL SETTINGS逐请求选择CPU/GPU、显式GPU副�
 
 GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复用查询能力并拆分计时，提供可选候选过滤/向量合并RPC（默认关闭、SQL可覆盖）。原生batch1/4/8探测完成；native占比低且GPU排队短，本轮不部署运行时批调度、批内取消或二进制IPC。自动策略/持久版本/GPU覆盖扩展仍分别留给G3—G5/P4。见 [改进验收](docs/validation/gpu-improvements.md)、[问题分析](docs/design/gpu-improvement-analysis.md) 和 [执行计划](docs/superpowers/plans/2026-10-15-gpu-improvements.md)。
 
+P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publication.md)和[九任务实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)，尚未实施。拟采用计算侧显式构建、存储侧校验/持久发布、读租约绑定权威工件、双计算节点显式加载与零训练重启恢复；包含批量写入后的完整重建发布、故障注入、旧版本回收、GPU重克隆及质量工件绑定。保留数据库级revision；数据缓存、自适应策略、表级版本和增量维护另行推进。规划中的命令、协议与验收脚本尚不可用，不代表P4验收完成。
+
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
 ### 团队协作
@@ -195,6 +197,7 @@ GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复
 │   ├── design/p2-grpc.md  # P2 协议、快照与隔离设计
 │   ├── design/interactive-sql-shell.md # P2.5 终端与可写数据库设计
 │   ├── design/p3-faiss-execution.md # P3 索引、两路径与计划展示设计
+│   ├── design/p4-index-publication.md # P4索引工件/发布/双节点/恢复设计提案（未实施）
 │   ├── design/gpu-improvement-analysis.md # GPU不足、补充探测与改进优先级
 │   ├── design/gpu-ann-execution.md # GPU ANN 与 SQL 设备选择设计
 │   ├── design/ann-recall-optimization.md # 低召回原因、校准证据和成本评估
@@ -211,6 +214,7 @@ GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复
 │   ├── superpowers/plans/2026-10-12-interactive-sql-shell.md # P2.5 执行计划与完成记录
 │   ├── superpowers/plans/2026-10-13-p3-faiss.md # P3 六任务实施计划
 │   ├── superpowers/plans/2026-10-15-gpu-improvements.md # GPU G0—G2实施记录与G3—G5待办
+│   ├── superpowers/plans/2026-10-16-p4-index-publication.md # P4索引子阶段九任务计划与验收矩阵（未实施）
 │   ├── superpowers/plans/2026-10-15-gpu-ann.md # GPU 六阶段实施记录
 │   ├── superpowers/plans/2026-10-13-ann-recall-optimization.md # 质量校准、配置与优化实施记录
 │   └── research/
