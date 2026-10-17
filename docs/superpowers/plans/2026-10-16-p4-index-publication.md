@@ -135,14 +135,14 @@ def test_digest_is_independent_of_batch_partition(snapshot):
 - ReadLease 增量字段及 SnapshotBatch 最终摘要字段见设计5.1；在源文件确认未使用号码后顺序分配，不复用旧号码。
 - `DatabaseCatalog.record_snapshot_digest(...)`、`begin_index_publication(...)`、`commit_index_publication(...)`、`get_index_publication(...)` 仅委托 Database.call；新错误类型独立映射，不沿用把所有 OSError 当 NOT_FOUND 的 `_abort`。
 
-- [ ] 写协议失败测试：旧字段解码不变；缺final/尾随帧/重复offset/超4MiB/错误身份拒绝；最终 snapshot digest 必须来自完整导出。
-- [ ] 写真实RPC失败测试：上传不可见、Finalize后可下载、同operation重放、revision改变拒绝、结构合法但内容错、commit后故意丢响应仍查得COMMITTED；下载只能取租约固定工件。
-- [ ] 运行新测试确认失败；修改proto并执行 `conda run -n vecstor python scripts/generate_proto.py`。
-- [ ] 实现新能力 `index_publication_version=1` 与RPC编排；上传按完整流seal，Finalize调用T3后T2；同key已有有效工件可跳过训练/上传/新收据，但必须校验它仍READY并执行相同CAS。Prune在本任务只定义协议并明确返回UNIMPLEMENTED，T8才接入真实回收，期间不宣称支持回收。
-- [ ] 在完整Snapshot导出正常结束时通过Database队列保存收据，取消/过期时不保存；租约内部状态不与SQLStorageService `_leases` 重复维护。
-- [ ] 实现非阻塞2工件/1verifier/4共享名额，所有异常路径释放；数据库锁不得包住流等待、子进程或文件I/O。
-- [ ] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_artifact_protocol.py tests/integration/test_index_publication_rpc.py tests/integration/test_p3_storage.py tests/integration/test_fused_candidates.py`；额外断言满载时FetchVectors/EndRead可完成。
-- [ ] 核对proto重新生成结果稳定、旧客户端仍可用；授权时提交 `feat: publish and distribute index artifacts over RPC`。
+- [x] 写协议失败测试：旧字段解码不变；缺final/尾随帧/重复offset/超4MiB/错误身份拒绝；最终 snapshot digest 必须来自完整导出。
+- [x] 写真实RPC失败测试：上传不可见、Finalize后可下载、同operation重放、revision改变拒绝、结构合法但内容错、commit后故意丢响应仍查得COMMITTED；下载只能取租约固定工件。
+- [x] 运行新测试确认失败；修改proto并执行 `conda run -n vecstor python scripts/generate_proto.py`。
+- [x] 实现新能力 `index_publication_version=1` 与RPC编排；上传按完整流seal，Finalize调用T3后T2；同key已有有效工件可跳过训练/上传/新收据，但必须校验它仍READY并执行相同CAS。Prune在本任务只定义协议并明确返回UNIMPLEMENTED，T8才接入真实回收，期间不宣称支持回收。
+- [x] 在完整Snapshot导出正常结束时通过Database队列保存收据，取消/过期时不保存；租约内部状态不与SQLStorageService `_leases` 重复维护。
+- [x] 实现非阻塞2工件/1verifier/4共享名额，所有异常路径释放；数据库锁不得包住流等待、子进程或文件I/O。
+- [x] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_artifact_protocol.py tests/integration/test_index_publication_rpc.py tests/integration/test_p3_storage.py tests/integration/test_fused_candidates.py`；额外断言满载时FetchVectors/EndRead可完成。
+- [x] 核对proto重新生成结果稳定、旧客户端仍可用；授权时提交 `feat: publish and distribute index artifacts over RPC`。
 
 ## Task 5：计算侧显式发布、加载与引用管理
 
@@ -289,3 +289,5 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 - T2目录事务/读租约绑定完成；35项目录及P3存储测试通过（15.73秒）。目录提交不改变data revision，同快照换head保留旧读；T3—T9继续。
 
 - T3不可变文件、容量预留及独立验证进程完成；34项工件/存储/worker测试通过（1.92秒），含父目录fsync失败后的孤儿容量回归先失败再修复。T4—T9继续。
+
+- T4增量存储RPC、类型化帧、同租约导出收据与分发完成；34项定向通过，后补摘要冒认单项通过；阶段完整真实GPU回归623通过（195.44秒）。proto重复生成字节一致。T5失败测试已建立，T5—T9继续。

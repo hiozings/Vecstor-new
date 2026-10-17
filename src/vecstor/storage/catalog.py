@@ -84,7 +84,14 @@ class DatabaseCatalog:
         return self.database(database_id).call("import", source, table, load, operation_id, timeout=timeout,cancelled=cancelled)
 
     def begin_read(self, database_id, table, ttl=15, timeout=15):
-        return self.database(database_id).call("begin_read", table, ttl,timeout=timeout)
+        return self.database(database_id).call("begin_read", table, ttl, True,timeout=timeout)
+
+    def index_call(self, database_id, method, *args, timeout=15, cancelled=None):
+        allowed = {'begin_index_publication','bind_index_upload','index_phase','commit_index_publication',
+                   'get_index_publication','fail_index_publication','list_published_indexes','leased_index',
+                   'record_snapshot_digest','snapshot_receipt','check_index_publication','claim_index_finalize','index_lease_remaining'}
+        if method not in allowed: raise ValueError('Unknown index catalog operation')
+        return self.database(database_id).call(method, *args, timeout=timeout, cancelled=cancelled)
 
     def scan(self, database_id, token, sql, timeout=15, cancelled=None):
         return self.database(database_id).call("scan", token, sql,timeout=timeout,cancelled=cancelled)

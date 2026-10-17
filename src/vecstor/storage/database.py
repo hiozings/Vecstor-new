@@ -339,7 +339,9 @@ class Database:
     def _end_read(self, token):
         self._candidate_plans.pop(token,None)
         self._snapshot_digests.pop(token, None)
-        self.index_catalog.abort_lease(token)
+        abandoned = self.index_catalog.abort_lease(token)
+        if self.artifact_store is not None:
+            for operation in abandoned: self.artifact_store.abort_later((self.id, operation))
         lease = self.leases.pop(token, None)
         if lease:
             lease[0].execute("ROLLBACK")
@@ -387,6 +389,30 @@ class Database:
 
     def _list_index_artifacts(self, table_id=None, limit=128, cursor=''):
         return self.index_catalog.list_artifacts(table_id, limit, cursor)
+
+    def _snapshot_receipt(self, token):
+        return self._publication_lease(token)[1]
+
+    def _index_lease_remaining(self, token):
+        self._publication_lease(token)
+        return self.leases[token][1] - time.monotonic()
+
+    def _check_index_publication(self, operation_id, token):
+        return self.index_catalog.check_operation(operation_id, token)
+
+    def _claim_index_finalize(self, operation_id, token):
+        return self.index_catalog.claim_finalize(operation_id, token)
+
+    def _list_published_indexes(self, table, limit, cursor):
+        table_id = None
+        if table:
+            row = self.connection.execute('SELECT table_id FROM __vecstor_tables WHERE name=?', [safe_name(table)]).fetchone()
+            if row is None: raise ValueError('Unknown vector table')
+            table_id = row[0]
+        records, cursor = self.index_catalog.list_artifacts(table_id, limit, cursor)
+        revision = self._revision()
+        for record in records: record['matches_current'] = record['descriptor']['key']['revision'] == revision
+        return records, cursor
 
     def close(self):
         def shutdown():

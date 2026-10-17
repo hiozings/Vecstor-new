@@ -18,6 +18,7 @@ class PreparedStore:
     """Only the prepared-object boundary is fake; metadata uses real DuckDB."""
     def __init__(self): self.objects = {}
     def prepared(self, descriptor): return self.objects.get(descriptor.artifact_id) == descriptor
+    def abort_later(self, operation): pass
 
 
 @pytest.fixture

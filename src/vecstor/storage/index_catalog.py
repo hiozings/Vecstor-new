@@ -110,9 +110,28 @@ class IndexCatalog:
         return self._save(replace(record, state='ABORTED' if code in ('ABORTED', 'CANCELLED', 'DEADLINE_EXCEEDED') else 'FAILED',
                                   error=dict(code=code, reason=reason)))
 
+    def claim_finalize(self, operation_id, token):
+        record = self.get_operation(operation_id)
+        require(record is not None, 'unknown_publication', 'NOT_FOUND')
+        if record.state in TERMINAL or record.state == 'VALIDATING': return record, False
+        self.check_operation(operation_id, token)
+        require(record.state == 'STAGED' or (record.state == 'RESERVED' and record.descriptor is not None),
+                'publication_not_staged', 'FAILED_PRECONDITION')
+        return self._save(replace(record, state='VALIDATING')), True
+
+    def check_operation(self, operation_id, token):
+        self.lease_lookup(token)
+        row = self.connection.execute('SELECT lease_token FROM __vecstor_index_operations WHERE operation_id=?', [operation_id]).fetchone()
+        require(row is not None and row[0] == token, 'publication_lease_mismatch', 'FAILED_PRECONDITION')
+        return self.get_operation(operation_id)
+
     def abort_lease(self, token):
+        aborted = []
         for row in self.connection.execute('SELECT operation_id FROM __vecstor_index_operations WHERE lease_token=?', [token]).fetchall():
-            self.fail(row[0], 'ABORTED', 'lease_ended')
+            if self.get_operation(row[0]).state not in TERMINAL:
+                self.fail(row[0], 'ABORTED', 'lease_ended')
+                aborted.append(row[0])
+        return aborted
 
     def resolve_head(self, connection, snapshot):
         row = connection.execute('SELECT a.descriptor_json, h.generation, a.state FROM __vecstor_index_heads h JOIN __vecstor_index_artifacts a USING (artifact_id) WHERE h.snapshot_json=?', [canonical(list(snapshot)).decode()]).fetchone()

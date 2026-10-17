@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
 import math
+from pathlib import Path
 from threading import BoundedSemaphore, Lock
 import time
 
@@ -46,15 +47,20 @@ def _bounded(message, context):
 
 class SQLStorageService(rpc.SQLStorageServicer):
     def __init__(self, root, candidate_binding="text",candidate_plan_cache=True):
-        self.catalog = DatabaseCatalog(root,candidate_binding,candidate_plan_cache)
+        from vecstor.storage.index_artifacts import ArtifactStore
+        from vecstor.storage.index_service import IndexPublicationService
+        store = ArtifactStore(Path(root)/'indexes')
+        self.catalog = DatabaseCatalog(root,candidate_binding,candidate_plan_cache,artifact_store=store)
         # Shared occupancy cap prevents either stream type from starving the
         # FetchVectors, BeginRead and EndRead unary handlers.
         self._stream_slots = BoundedSemaphore(4)
+        self.index_service = IndexPublicationService(self.catalog, store, self._stream_slots)
         self._lease_lock = Lock()
         self._leases = {}
 
     def close(self):
         self.catalog.close()
+        self.index_service.store.close()
         with self._lease_lock:
             self._leases.clear()
 
@@ -62,7 +68,7 @@ class SQLStorageService(rpc.SQLStorageServicer):
         timeout = _remaining(context)
         try:
             if request.action == 'capabilities':
-                result={'fused_candidate_vectors':True}
+                result={'fused_candidate_vectors':True, 'index_publication_version':1}
             elif request.action == 'list_databases':
                 result = self.catalog.list_databases()
             elif request.action == 'open_database':
@@ -181,6 +187,8 @@ class SQLStorageService(rpc.SQLStorageServicer):
                 context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,'Snapshot batch exceeds transfer limit')
             batch_rows=min(requested,VECTOR_PAYLOAD_BYTES//(lease['dimension']*4))
             total=lease['row_count'];offset=0;after=-1
+            from vecstor.index.artifact import SnapshotHasher
+            hasher = SnapshotHasher(total, lease['dimension'])
             while True:
                 rows=self.catalog.snapshot_page(request.database_id,request.token,after,batch_rows,
                         timeout=_remaining(context),cancelled=lambda:not context.is_active())
@@ -188,12 +196,17 @@ class SQLStorageService(rpc.SQLStorageServicer):
                     context.abort(grpc.StatusCode.DATA_LOSS,'Snapshot count mismatch')
                 if rows or total==0:
                     vectors=np.asarray([r[1] for r in rows],dtype='<f4').reshape(len(rows),lease['dimension'])
+                    hasher.add(np.asarray([r[0] for r in rows], dtype=np.int64), vectors)
+                    final = offset+len(rows) == total
                     yield _bounded(pb.SnapshotBatch(token=request.token,revision=lease['revision'],
                         table_id=lease['table_id'],schema_version=lease['schema_version'],dimension=lease['dimension'],
-                        total_rows=total,offset=offset,ids=[r[0] for r in rows],vectors_f32_le=vectors.tobytes()),context)
+                        total_rows=total,offset=offset,ids=[r[0] for r in rows],vectors_f32_le=vectors.tobytes(),
+                        snapshot_complete=final, snapshot_sha256=hasher.finish() if final else ''),context)
                 offset+=len(rows)
                 if offset==total: break
                 after=rows[-1][0]
+            self.catalog.index_call(request.database_id, 'record_snapshot_digest', request.token, hasher.finish(), total,
+                                    timeout=_remaining(context), cancelled=lambda:not context.is_active())
         except (ValueError,OSError,TimeoutError) as error:
             _abort(context,error)
         finally:
@@ -233,6 +246,14 @@ class SQLStorageService(rpc.SQLStorageServicer):
             return response
         except (ValueError,OSError,TimeoutError) as error:_abort(context,error)
         finally:self._stream_slots.release()
+
+    def BeginIndexPublication(self, request, context): return self.index_service.BeginIndexPublication(request, context)
+    def UploadIndexArtifact(self, request, context): return self.index_service.UploadIndexArtifact(request, context)
+    def FinalizeIndexPublication(self, request, context): return self.index_service.FinalizeIndexPublication(request, context)
+    def GetIndexPublication(self, request, context): return self.index_service.GetIndexPublication(request, context)
+    def ListPublishedIndexes(self, request, context): return self.index_service.ListPublishedIndexes(request, context)
+    def DownloadIndexArtifact(self, request, context): return self.index_service.DownloadIndexArtifact(request, context)
+    def PruneIndexArtifacts(self, request, context): return self.index_service.PruneIndexArtifacts(request, context)
 
 
 def create_catalog_server(root, address, candidate_binding="text",candidate_plan_cache=True):

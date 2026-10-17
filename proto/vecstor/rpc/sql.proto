@@ -65,6 +65,10 @@ message ReadLease {
   uint32 dimension = 6;
   string table = 7;
   optional uint64 row_count = 8;
+  uint32 index_publication_version = 9;
+  uint64 publication_generation = 10;
+  IndexArtifactDescriptor published_index = 11;
+  string published_index_state = 12;
 }
 message LeaseRequest { string database_id = 1; string token = 2; }
 message ScanRequest { string database_id = 1; string token = 2; string sql = 3; uint32 batch_rows = 4; }
@@ -94,6 +98,8 @@ message SnapshotBatch {
   uint64 offset = 7;
   repeated int64 ids = 8;
   bytes vectors_f32_le = 9;
+  bool snapshot_complete = 10;
+  string snapshot_sha256 = 11;
 }
 message CandidateRequest { string database_id = 1; string token = 2; string sql = 3; repeated int64 ids = 4; }
 message CandidateResult {
@@ -121,6 +127,94 @@ message BuildIndexRequest {
   uint32 gpu_id = 6;
 }
 message IndexRequest { string database_id = 1; string table = 2; string device = 3; }
+message IndexIdentity {
+  string database_id = 1;
+  string table_id = 2;
+  uint64 revision = 3;
+  string schema_version = 4;
+  uint32 dimension = 5;
+  string metric = 6;
+  string build_fingerprint = 7;
+}
+message IndexBuildConfig { uint32 nlist = 1; uint64 seed = 2; uint64 train_rows = 3; }
+message IndexArtifactDescriptor {
+  uint32 format_version = 1;
+  string payload_format = 2;
+  IndexIdentity key = 3;
+  IndexBuildConfig build_config = 4;
+  string faiss_version = 5;
+  string platform = 6;
+  uint64 row_count = 7;
+  uint32 nlist = 8;
+  uint64 payload_size = 9;
+  string payload_sha256 = 10;
+  string snapshot_sha256 = 11;
+  string artifact_id = 12;
+}
+message IndexPublicationRecord {
+  string operation_id = 1;
+  string operation_kind = 2;
+  string state = 3;
+  string intent_json = 4;
+  string intent_digest = 5;
+  string request_digest = 6;
+  IndexIdentity key = 7;
+  uint64 expected_generation = 8;
+  uint64 generation = 9;
+  IndexArtifactDescriptor descriptor = 10;
+  string error_code = 11;
+  string error_reason = 12;
+  string result_json = 13;
+}
+message BeginIndexPublicationRequest {
+  string database_id = 1;
+  string token = 2;
+  string operation_id = 3;
+  IndexBuildConfig config = 4;
+  uint64 expected_generation = 5;
+  string intent_json = 6;
+}
+message IndexArtifactChunk { uint64 offset = 1; bytes data = 2; }
+message IndexArtifactComplete { uint64 total_size = 1; string payload_sha256 = 2; }
+message IndexUploadFrame {
+  string database_id = 1;
+  string token = 2;
+  string operation_id = 3;
+  oneof content {
+    IndexArtifactDescriptor header = 4;
+    IndexArtifactChunk chunk = 5;
+    IndexArtifactComplete trailer = 6;
+  }
+}
+message FinalizeIndexPublicationRequest { string database_id = 1; string token = 2; string operation_id = 3; }
+message IndexPublicationRequest { string database_id = 1; string operation_id = 2; }
+message ListPublishedIndexesRequest { string database_id = 1; string table = 2; uint32 page_size = 3; string cursor = 4; }
+message PublishedIndexStatus { IndexArtifactDescriptor descriptor = 1; string state = 2; uint64 generation = 3; bool matches_current = 4; }
+message ListPublishedIndexesResponse { repeated PublishedIndexStatus indexes = 1; string next_cursor = 2; }
+message DownloadIndexArtifactRequest { string database_id = 1; string token = 2; string artifact_id = 3; }
+message IndexArtifactFrame {
+  string database_id = 1;
+  string token = 2;
+  string artifact_id = 3;
+  oneof content {
+    IndexArtifactDescriptor descriptor = 4;
+    IndexArtifactChunk chunk = 5;
+    IndexArtifactComplete complete = 6;
+  }
+}
+message PruneIndexArtifactsRequest {
+  string database_id = 1;
+  string operation_id = 2;
+  uint32 keep_last = 3;
+  bool dry_run = 4;
+}
+message PruneIndexArtifactsResponse {
+  repeated string candidates = 1;
+  repeated string protected = 2;
+  repeated string deleted = 3;
+  uint64 deleted_bytes = 4;
+  string state = 5;
+}
 service SQLStorage {
   rpc Control(ControlRequest) returns (ControlResponse);
   rpc ExecuteSQL(SQLRequest) returns (stream ResultFrame);
@@ -131,6 +225,13 @@ service SQLStorage {
   rpc StreamVectorSnapshot(SnapshotRequest) returns (stream SnapshotBatch);
   rpc FilterCandidates(CandidateRequest) returns (CandidateResult);
   rpc FilterCandidateVectors(CandidateRequest) returns (FilteredVectorResult);
+  rpc BeginIndexPublication(BeginIndexPublicationRequest) returns (IndexPublicationRecord);
+  rpc UploadIndexArtifact(stream IndexUploadFrame) returns (IndexPublicationRecord);
+  rpc FinalizeIndexPublication(FinalizeIndexPublicationRequest) returns (IndexPublicationRecord);
+  rpc GetIndexPublication(IndexPublicationRequest) returns (IndexPublicationRecord);
+  rpc ListPublishedIndexes(ListPublishedIndexesRequest) returns (ListPublishedIndexesResponse);
+  rpc DownloadIndexArtifact(DownloadIndexArtifactRequest) returns (stream IndexArtifactFrame);
+  rpc PruneIndexArtifacts(PruneIndexArtifactsRequest) returns (PruneIndexArtifactsResponse);
 }
 service SQLCompute {
   rpc Control(ControlRequest) returns (ControlResponse);

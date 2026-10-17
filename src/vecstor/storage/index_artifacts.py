@@ -1,5 +1,6 @@
 """Storage-owned immutable files, upload reservations, and transfer pins."""
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -44,6 +45,7 @@ class ArtifactStore:
         self.max_artifact_bytes, self.max_total_bytes, self.min_free_bytes = max_artifact_bytes, max_total_bytes, min_free_bytes
         self.lock = RLock()
         self._verifier = BoundedSemaphore(1)
+        self._cleanup = ThreadPoolExecutor(max_workers=1, thread_name_prefix='vecstor-artifact-cleanup')
         self._uploads, self._ready, self._pins, self._deleting = {}, {}, {}, set()
         self._reserved, self._stored = 0, 0
         self.epoch = uuid.uuid4().hex
@@ -172,6 +174,13 @@ class ArtifactStore:
             with self.lock:
                 self._uploads.pop(operation, None)
                 self._reserved -= upload.reserved
+
+    def abort_later(self, operation):
+        self._cleanup.submit(self.abort_upload, operation)
+
+    def close(self):
+        self._cleanup.shutdown(wait=True)
+        for operation in list(self._uploads): self.abort_upload(operation)
 
     def prepared(self, descriptor):
         with self.lock:
