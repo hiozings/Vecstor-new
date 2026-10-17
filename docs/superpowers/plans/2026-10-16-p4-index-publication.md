@@ -50,7 +50,7 @@
 
 依赖顺序：T1 → T2/T3（接口先固定）→ T4 → T5 → T6 → T7/T8 → T9。这是依赖关系，不自动授权并行代理。每个任务独立完成失败测试→实现→通过测试→审查；不要一次改完所有层后才测试。
 
-## T1：固定工件格式、规范内容摘要与兼容性
+## Task 1：固定工件格式、规范内容摘要与兼容性
 
 **Files:** 新增 `src/vecstor/index/artifact.py`、`tests/unit/test_index_artifact.py`；修改 `src/vecstor/index/faiss_backend.py`；复用 `tests/unit/test_faiss_index.py`。
 
@@ -63,7 +63,7 @@
 - `ArtifactError(code: str, reason: str)`：code 为设计中的 gRPC 状态名，由边界层映射，不在底层调用 context.abort。
 - 协调结果类型同文件定义：`PublicationRecord`（operation_id/operation_kind/request_intent/intent_digest/request_digest/key/expected_generation/state/descriptor/generation/error；PRUNE的key和descriptor为null，额外结果保存PruneResult）、`PublishedLease`（既有 lease 字段及 publication_version/generation/descriptor/state）、`PruneResult`（candidate/protected/deleted ID 与字节）、`ArtifactInspection`（descriptor/generation/cpu_ready/gpu_ready/state）。字段不可省略时使用显式 null，不靠缺键猜状态。
 
-- [ ] 写 `test_digest_is_independent_of_batch_partition`、`test_large_int64_and_signed_zero_preserved`、`test_descriptor_id_covers_key_and_payload`、`test_valid_ids_wrong_vectors_rejected`、`test_unknown_format_or_faiss_version_rejected`，按设计规范断言。
+- [x] 写 `test_digest_is_independent_of_batch_partition`、`test_large_int64_and_signed_zero_preserved`、`test_descriptor_id_covers_key_and_payload`、`test_valid_ids_wrong_vectors_rejected`、`test_unknown_format_or_faiss_version_rejected`，按设计规范断言。
 
 ```python
 def test_digest_is_independent_of_batch_partition(snapshot):
@@ -77,12 +77,12 @@ def test_digest_is_independent_of_batch_partition(snapshot):
     assert one.finish() == many.finish()
 ```
 
-- [ ] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_artifact.py`，先观察缺实现或断言失败，保存失败摘要。
-- [ ] 实现规范 raw Faiss payload 与 descriptor；向量摘要从 IVFFlat 倒排代码提取，不要求现有索引启用 DirectMap，不更改旧 NPZ 管道封装。
-- [ ] 运行上述测试及 `tests/unit/test_faiss_index.py`；证明错误向量即使 hash 重算也被权威 snapshot digest 拒绝，限制大小在 native 读取之前检查。
-- [ ] 审查工件格式/身份值并记录本任务结果；有 Git 授权时提交 `feat: define immutable CPU index artifacts`。
+- [x] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_artifact.py`，先观察缺实现或断言失败，保存失败摘要。
+- [x] 实现规范 raw Faiss payload 与 descriptor；向量摘要从 IVFFlat 倒排代码提取，不要求现有索引启用 DirectMap，不更改旧 NPZ 管道封装。
+- [x] 运行上述测试及 `tests/unit/test_faiss_index.py`；证明错误向量即使 hash 重算也被权威 snapshot digest 拒绝，限制大小在 native 读取之前检查。
+- [x] 审查工件格式/身份值并记录本任务结果；有 Git 授权时提交 `feat: define immutable CPU index artifacts`。
 
-## T2：目录事务、发布 CAS 与读租约绑定
+## Task 2：目录事务、发布 CAS 与读租约绑定
 
 **Files:** 新增 `src/vecstor/storage/index_catalog.py`、`tests/unit/test_index_catalog.py`；修改 `storage/database.py`、`storage/catalog.py`；扩展 `tests/unit/test_catalog.py`。
 
@@ -103,7 +103,7 @@ def test_digest_is_independent_of_batch_partition(snapshot):
 - [ ] 运行新测试及 `tests/unit/test_catalog.py tests/integration/test_p3_storage.py`；断言旧接口不变、发布事务失败不会推进 revision/generation、COMMITTED 不被取消覆盖。
 - [ ] 审查线性化点和锁序；授权时提交 `feat: bind published index heads to read leases`。
 
-## T3：不可变对象存储、校验子进程与容量账本
+## Task 3：不可变对象存储、校验子进程与容量账本
 
 **Files:** 新增 `src/vecstor/storage/index_artifacts.py`、`src/vecstor/index/artifact_worker.py`、`tests/unit/test_index_artifact_store.py`、`tests/integration/test_index_artifact_worker.py`。
 
@@ -124,7 +124,7 @@ def test_digest_is_independent_of_batch_partition(snapshot):
 - [ ] 测试注入 write/fsync/rename/worker exit 各失败点；断言容量预留释放、临时文件清理、已存在对象不变、已准备对象在重启可识别。
 - [ ] 运行新测试；授权时提交 `feat: persist and validate bounded index artifacts`。
 
-## T4：增量协议与存储发布/分发 RPC
+## Task 4：增量协议与存储发布/分发 RPC
 
 **Files:** 修改 `proto/vecstor/rpc/sql.proto`、生成模块、`storage/sql_service.py`、`storage/catalog.py`；新增 `storage/index_service.py`、`tests/integration/test_index_publication_rpc.py`、`tests/unit/test_index_artifact_protocol.py`。
 
@@ -144,7 +144,7 @@ def test_digest_is_independent_of_batch_partition(snapshot):
 - [ ] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_artifact_protocol.py tests/integration/test_index_publication_rpc.py tests/integration/test_p3_storage.py tests/integration/test_fused_candidates.py`；额外断言满载时FetchVectors/EndRead可完成。
 - [ ] 核对proto重新生成结果稳定、旧客户端仍可用；授权时提交 `feat: publish and distribute index artifacts over RPC`。
 
-## T5：计算侧显式发布、加载与引用管理
+## Task 5：计算侧显式发布、加载与引用管理
 
 **Files:** 新增 `src/vecstor/compute/index_publication.py`、`tests/unit/test_index_publication_manager.py`、`tests/integration/test_index_artifact_loading.py`；修改 `compute/index_manager.py`、`index/registry.py`、`compute/sql_service.py`、proto及生成模块。
 
@@ -164,7 +164,7 @@ def test_digest_is_independent_of_batch_partition(snapshot):
 - [ ] 运行新测试及 `tests/unit/test_index_registry.py tests/unit/test_index_manager.py tests/integration/test_p3_execution.py`；新proto再生成并检查。
 - [ ] 审查总deadline传播、子进程数和错误结果；授权时提交 `feat: load published indexes without retraining`。
 
-## T6：published 查询模式与双节点切换安全性
+## Task 6：published 查询模式与双节点切换安全性
 
 **Files:** 修改 `compute/lease_io.py`、`compute/vector_execution.py`、`compute/sql_service.py`、`compute/service.py`；新增 `tests/integration/test_p4_index_consistency.py`；扩展 `tests/unit/test_p3_lease_io.py`。
 
@@ -193,7 +193,7 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 - [ ] 运行新测试及 `tests/integration/test_p3_execution.py tests/unit/test_gpu_review_regressions.py`；检查A/B屏障、旧读答案和新读版本。
 - [ ] 授权时提交 `feat: enforce lease-bound published indexes across compute nodes`。
 
-## T7：GPU 工件来源与质量配置 v3
+## Task 7：GPU 工件来源与质量配置 v3
 
 **Files:** 修改 `index/gpu_registry.py`、`index/gpu_backend.py`、`compute/index_publication.py`、`query/quality_policy.py`、`compute/sql_service.py`；新增 `tests/unit/test_artifact_quality_policy.py`、`tests/integration/test_p4_gpu_restore.py`、`benchmarks/p4/validate_artifact_quality.py`。
 
@@ -211,7 +211,7 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 - [ ] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_artifact_quality_policy.py tests/unit/test_quality_policy.py tests/unit/test_gpu_quality.py`；真实GPU运行 `VECSTOR_REQUIRE_GPU=1 conda run -n vecstor python -m pytest -q tests/integration/test_p4_gpu_restore.py tests/integration/test_gpu_execution.py`。
 - [ ] 新工具先以小fixture验证“样本不足不导出”，正式500条工件证据随T9归档；授权时提交 `feat: bind restored GPU replicas and quality profiles to artifacts`。
 
-## T8：启动恢复、旧版本回收与终端命令
+## Task 8：启动恢复、旧版本回收与终端命令
 
 **Files:** 新增 `compute/index_recovery.py`、`tests/integration/test_p4_index_recovery.py`、`tests/integration/test_p4_index_gc.py`、`tests/unit/test_index_preload.py`；修改 `storage/index_catalog.py`、`storage/index_artifacts.py`、`rpc/server.py`、`rpc/sql_client.py`、`shell/commands.py`、`isolation.py`、服务构造参数。
 
@@ -233,7 +233,7 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 - [ ] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_preload.py tests/integration/test_p4_index_recovery.py tests/integration/test_p4_index_gc.py tests/unit/test_shell_ui.py tests/integration/test_shell_workflow.py`；增加真实PTY新命令流程。
 - [ ] 授权时提交 `feat: recover and prune published index versions explicitly`。
 
-## T9：双节点、崩溃、规模验收与交付文档
+## Task 9：双节点、崩溃、规模验收与交付文档
 
 **Files:** 新增 `rpc/p4_index_acceptance.py`、`scripts/check_p4_indexes.py`、`benchmarks/p4/index_lifecycle.py`、`benchmarks/p4/README.md`、`tests/integration/test_p4_index_acceptance.py`、`tests/integration/test_p4_index_crashes.py`、`docs/p4-indexes.md`、`docs/validation/p4-indexes.md`；更新README、用户说明、AGENTS、CHANGELOG。
 
@@ -280,3 +280,8 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 | 10 兼容/限制 | 全局约束、T1、T7、T9文档 |
 
 本轮完成设计与计划编写、文档链接/一致性自查及项目文档索引更新；未修改业务代码、proto、测试或依赖，未运行新的业务回归，未执行Git操作。上述命令与测试名均为实施目标，不是已有测试通过记录。
+
+## 实施记录（2026-10-17）
+
+- 已获授权按任务实施、建分支与分阶段提交；分支codex/p4-index-publication，未合并/推送，用户.gitignore修改未纳入。
+- 实施前完整真实GPU基线565通过（138.96秒）。T1工件与原Faiss测试52通过（2.07秒）；T2—T9待实施，P4尚未验收。
