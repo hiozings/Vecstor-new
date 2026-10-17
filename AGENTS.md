@@ -117,7 +117,7 @@ GPU ANN 已按计划接入：SQL SETTINGS逐请求选择CPU/GPU、显式GPU副�
 
 GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复用查询能力并拆分计时，提供可选候选过滤/向量合并RPC（默认关闭、SQL可覆盖）。原生batch1/4/8探测完成；native占比低且GPU排队短，本轮不部署运行时批调度、批内取消或二进制IPC。自动策略/持久版本/GPU覆盖扩展仍分别留给G3—G5/P4。见 [改进验收](docs/validation/gpu-improvements.md)、[问题分析](docs/design/gpu-improvement-analysis.md) 和 [执行计划](docs/superpowers/plans/2026-10-15-gpu-improvements.md)。
 
-P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publication.md)和[九任务实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)，2026-10-17开始实施：T1已增加原生CPU工件格式、完整身份及规范ID/向量摘要校验，52项工件/Faiss定向测试通过；T2已增加目录事务/CAS/读租约绑定并通过35项定向测试；工件存储、RPC与恢复等T3—T9仍待实施。拟采用计算侧显式构建、存储侧校验/持久发布、读租约绑定权威工件、双计算节点显式加载与零训练重启恢复；包含批量写入后的完整重建发布、故障注入、旧版本回收、GPU重克隆及质量工件绑定。保留数据库级revision；数据缓存、自适应策略、表级版本和增量维护另行推进。规划中的命令、协议与验收脚本尚不可用，不代表P4验收完成。
+P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publication.md)和[九任务实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)，2026-10-17开始实施：T1已增加原生CPU工件格式、完整身份及规范ID/向量摘要校验，52项工件/Faiss定向测试通过；T2已增加目录事务/CAS/读租约绑定并通过35项定向测试；T3已实现工件文件/容量预留/独立校验并通过34项定向测试；新RPC、双节点与恢复等T4—T9仍待实施。拟采用计算侧显式构建、存储侧校验/持久发布、读租约绑定权威工件、双计算节点显式加载与零训练重启恢复；包含批量写入后的完整重建发布、故障注入、旧版本回收、GPU重克隆及质量工件绑定。保留数据库级revision；数据缓存、自适应策略、表级版本和增量维护另行推进。规划中的命令、协议与验收脚本尚不可用，不代表P4验收完成。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -163,7 +163,7 @@ P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publi
 │   ├── evaluation.py     # 独立 NumPy 真值和 12 查询验收负载
 │   ├── cli.py            # 命令行参数和产物输出
 │   ├── isolation.py      # 计算进程 Landlock 权限与拒绝读取探针
-│   ├── storage/          # service.py兼容P2；catalog/database/sql_service管理库/事务/租约，index_catalog管理索引发布目录
+│   ├── storage/          # service.py兼容P2；catalog/database/sql_service管理库/事务/租约，index_catalog/index_artifacts管理索引目录与工件文件
 │   ├── compute/          # P2 RemoteEngine、v2 路由、lease_io/index_manager/vector_execution
 │   ├── index/            # CPU工件格式/摘要校验、GPU worker/副本、CPU IVF、快照键、有界registry与构建进程
 │   ├── rpc/              # v1/v2 协议、能力缓存会话客户端、timing接入计时、类型化结果、生命周期和验收

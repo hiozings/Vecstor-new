@@ -117,12 +117,12 @@ def test_digest_is_independent_of_batch_partition(snapshot):
 - `delete_retired(descriptor: ArtifactDescriptor) -> int`；`reserved_bytes` / `stored_bytes` / `transfer_pins` 只读统计；具体 GC 选择交 T8。
 - `verify_in_worker(path: Path, descriptor: ArtifactDescriptor, deadline: float, cancelled: Callable[[], bool], max_working_bytes=512*1024**2) -> dict`：仅 storage 调用；新解释器只读 staging 文件，返回实际结构、内容摘要、RSS及耗时。
 
-- [ ] 写失败测试：`test_reject_symlink_and_path_escape`、`test_chunk_limit_and_offset`、`test_quota_reserved_before_upload`、`test_fsync_failure_never_marks_prepared`、`test_existing_object_never_overwritten`、`test_verifier_cancellation_reaps_process`、`test_digest_checked_before_native_read`。
-- [ ] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_artifact_store.py tests/integration/test_index_artifact_worker.py`，记录失败。
-- [ ] 实现同文件系统 staging→objects 安装，文件/目录 fsync，manifest和payload不可变；以真实成功落盘产生 prepared 状态，不能用调用者布尔值跳过验证。
-- [ ] 实现 verifier 一次 communicate 专用线程、deadline终止/回收，失败返回明确错误；内存估算包括 payload/原生/排序副本，单任务准入。
-- [ ] 测试注入 write/fsync/rename/worker exit 各失败点；断言容量预留释放、临时文件清理、已存在对象不变、已准备对象在重启可识别。
-- [ ] 运行新测试；授权时提交 `feat: persist and validate bounded index artifacts`。
+- [x] 写失败测试：`test_reject_symlink_and_path_escape`、`test_chunk_limit_and_offset`、`test_quota_reserved_before_upload`、`test_fsync_failure_never_marks_prepared`、`test_existing_object_never_overwritten`、`test_verifier_cancellation_reaps_process`、`test_digest_checked_before_native_read`。
+- [x] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_artifact_store.py tests/integration/test_index_artifact_worker.py`，记录失败。
+- [x] 实现同文件系统 staging→objects 安装，文件/目录 fsync，manifest和payload不可变；以真实成功落盘产生 prepared 状态，不能用调用者布尔值跳过验证。
+- [x] 实现 verifier 一次 communicate 专用线程、deadline终止/回收，失败返回明确错误；内存估算包括 payload/原生/排序副本，单任务准入。
+- [x] 测试注入 write/fsync/rename/worker exit 各失败点；断言容量预留释放、临时文件清理、已存在对象不变、已准备对象在重启可识别。
+- [x] 运行新测试；授权时提交 `feat: persist and validate bounded index artifacts`。
 
 ## Task 4：增量协议与存储发布/分发 RPC
 
@@ -287,3 +287,5 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 - 实施前完整真实GPU基线565通过（138.96秒）。T1工件与原Faiss测试52通过（2.07秒）；T2—T9待实施，P4尚未验收。
 
 - T2目录事务/读租约绑定完成；35项目录及P3存储测试通过（15.73秒）。目录提交不改变data revision，同快照换head保留旧读；T3—T9继续。
+
+- T3不可变文件、容量预留及独立验证进程完成；34项工件/存储/worker测试通过（1.92秒），含父目录fsync失败后的孤儿容量回归先失败再修复。T4—T9继续。

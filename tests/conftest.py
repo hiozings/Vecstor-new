@@ -5,6 +5,22 @@ import subprocess
 import sys
 import pytest
 
+
+@pytest.fixture
+def cpu_artifact():
+    import numpy as np
+    from vecstor.index.artifact import SnapshotHasher, encode_artifact
+    from vecstor.index.faiss_backend import FaissIndex
+    from vecstor.index.types import BuildConfig, IndexKey
+    ids = np.arange(2048, dtype=np.int64) + 2**53
+    vectors = np.random.default_rng(31).random((2048, 2), dtype=np.float32)
+    config = BuildConfig(nlist=1)
+    hasher = SnapshotHasher(len(ids), 2)
+    hasher.add(ids, vectors)
+    key = IndexKey('test-database', 'test-table', 1, 'test-schema', 2,
+                   build_fingerprint=config.fingerprint())
+    return encode_artifact(FaissIndex.build(ids, vectors, config), key, config, hasher.finish())
+
 GPU_FILES={'test_gpu_batch_probe.py','test_gpu_sessions.py','test_gpu_worker.py','test_gpu_execution.py','test_gpu_shell.py','test_gpu_quality_rpc.py','test_gpu_calibration.py','test_gpu_acceptance.py','test_gpu_benchmark.py'}
 
 
