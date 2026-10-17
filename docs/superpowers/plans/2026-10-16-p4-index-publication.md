@@ -95,13 +95,13 @@ def test_digest_is_independent_of_batch_partition(snapshot):
 - `get_operation(operation_id: str) -> PublicationRecord | None`；`list_artifacts(table_id: str | None, limit: int, cursor: str) -> tuple[list[dict], str]`；`resolve_head(connection, snapshot: tuple) -> tuple[ArtifactDescriptor | None, int, str]`。
 - `Database._record_snapshot_digest(token, digest, row_count) -> None`；`_begin_read` 同一事务读取数据与 head，租约内部增加完成收据，不把内部状态直接发给客户端。
 
-- [ ] 写失败测试，覆盖 `test_publication_does_not_advance_data_revision`、`test_old_lease_keeps_head_on_same_revision_switch`、`test_same_operation_replay_and_conflict`、`test_commit_after_other_table_write_aborts`、`test_drop_recreate_same_name_changes_identity`、`test_unknown_catalog_schema_rejected`。
-- [ ] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_catalog.py`，确认失败来自缺实现。
-- [ ] 实现设计3.3表与短事务；head CAS 使用该 snapshot 的旧 generation（不存在为0），成功从数据库级发布序列分配新值；其他 table 发布不无故冲突。
-- [ ] 实现每库1发布准入、操作摘要和终态重放；同 key 工件冲突、墓碑约束；小于1024行发布明确 FAILED_PRECONDITION，不发布空 IVF。
-- [ ] 将目录接入 Database 生命周期、租约及清理；租约结束将未提交发布终止并释放每库名额，COMMITTED不受影响。不要修改现有数据事务结果和 operation_id 命名空间。内存 fake 模拟对象已准备、pin 获取和丢失的不同状态。
-- [ ] 运行新测试及 `tests/unit/test_catalog.py tests/integration/test_p3_storage.py`；断言旧接口不变、发布事务失败不会推进 revision/generation、COMMITTED 不被取消覆盖。
-- [ ] 审查线性化点和锁序；授权时提交 `feat: bind published index heads to read leases`。
+- [x] 写失败测试，覆盖 `test_publication_does_not_advance_data_revision`、`test_old_lease_keeps_head_on_same_revision_switch`、`test_same_operation_replay_and_conflict`、`test_commit_after_other_table_write_aborts`、`test_drop_recreate_same_name_changes_identity`、`test_unknown_catalog_schema_rejected`。
+- [x] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_catalog.py`，确认失败来自缺实现。
+- [x] 实现设计3.3表与短事务；head CAS 使用该 snapshot 的旧 generation（不存在为0），成功从数据库级发布序列分配新值；其他 table 发布不无故冲突。
+- [x] 实现每库1发布准入、操作摘要和终态重放；同 key 工件冲突、墓碑约束；小于1024行发布明确 FAILED_PRECONDITION，不发布空 IVF。
+- [x] 将目录接入 Database 生命周期、租约及清理；租约结束将未提交发布终止并释放每库名额，COMMITTED不受影响。不要修改现有数据事务结果和 operation_id 命名空间。内存 fake 模拟对象已准备、pin 获取和丢失的不同状态。
+- [x] 运行新测试及 `tests/unit/test_catalog.py tests/integration/test_p3_storage.py`；断言旧接口不变、发布事务失败不会推进 revision/generation、COMMITTED 不被取消覆盖。
+- [x] 审查线性化点和锁序；授权时提交 `feat: bind published index heads to read leases`。
 
 ## Task 3：不可变对象存储、校验子进程与容量账本
 
@@ -285,3 +285,5 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 
 - 已获授权按任务实施、建分支与分阶段提交；分支codex/p4-index-publication，未合并/推送，用户.gitignore修改未纳入。
 - 实施前完整真实GPU基线565通过（138.96秒）。T1工件与原Faiss测试52通过（2.07秒）；T2—T9待实施，P4尚未验收。
+
+- T2目录事务/读租约绑定完成；35项目录及P3存储测试通过（15.73秒）。目录提交不改变data revision，同快照换head保留旧读；T3—T9继续。

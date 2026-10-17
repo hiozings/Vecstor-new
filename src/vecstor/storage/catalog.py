@@ -11,7 +11,8 @@ from vecstor.storage.database import Database
 
 
 class DatabaseCatalog:
-    def __init__(self, root, candidate_binding="text", candidate_plan_cache=True):
+    def __init__(self, root, candidate_binding="text", candidate_plan_cache=True, artifact_store=None):
+        self.artifact_store = artifact_store
         if type(candidate_plan_cache) is not bool:raise ValueError("Invalid candidate plan cache flag")
         self.candidate_plan_cache=candidate_plan_cache
         if candidate_binding not in {"text","legacy"}:raise ValueError("Invalid candidate binding")
@@ -42,7 +43,7 @@ class DatabaseCatalog:
             if path.is_symlink(): raise ValueError("Database symlinks are not allowed")
             if not path.exists() and not create: raise ValueError(f"Database does not exist: {name}")
             if name not in self.opened:
-                self.opened[name] = Database(path, name, self.candidate_binding,self.candidate_plan_cache)
+                self.opened[name] = Database(path, name, self.candidate_binding,self.candidate_plan_cache, self.artifact_store)
             db = self.opened[name]
             return {"id": db.id, "name": name}
 

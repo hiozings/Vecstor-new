@@ -29,7 +29,9 @@ def result(columns=(), rows=(), affected_rows=None, **extra):
 
 
 class Database:
-    def __init__(self, path, name, candidate_binding="text", candidate_plan_cache=True):
+    def __init__(self, path, name, candidate_binding="text", candidate_plan_cache=True, artifact_store=None):
+        self.artifact_store = artifact_store
+        self._snapshot_digests = {}
         if type(candidate_plan_cache) is not bool:raise ValueError("Invalid candidate plan cache flag")
         self.candidate_plan_cache=candidate_plan_cache
         self._candidate_plans={}
@@ -56,6 +58,9 @@ class Database:
         if row is None:
             db.execute("INSERT INTO __vecstor_meta VALUES (?, 0)", [str(uuid.uuid4())])
             row = db.execute("SELECT database_id FROM __vecstor_meta").fetchone()
+        from vecstor.storage.index_catalog import IndexCatalog
+        self.index_catalog = IndexCatalog(db, self.artifact_store, self._publication_lease)
+        self.index_catalog.initialize()
         return row[0]
 
     def call(self, method, *args, timeout=15, cancelled=None):
@@ -226,7 +231,7 @@ class Database:
             return result(affected_rows=data.size, source_sha256=source_digest)
         return self._write(operation_id, digest, change)
 
-    def _begin_read(self, table, ttl):
+    def _begin_read(self, table, ttl, include_publication=False):
         table = safe_name(table)
         if not 0 < ttl <= 60 or len(self.leases) >= 16:
             raise ValueError("Read lease TTL must be <= 60 seconds and at most 16 leases may be active")
@@ -241,8 +246,12 @@ class Database:
             public = {"token": token, "database_id": self.id, "table_id": row[0], "revision": revision,
                       "schema_version": row[0], "dimension": row[1], "table": table,
                       "row_count": connection.execute(f"SELECT COUNT(*) FROM {identifier(table)}").fetchone()[0]}
-            self.leases[token] = (connection, time.monotonic() + ttl, public)
-            return public
+            snapshot = (self.id, row[0], revision, row[0], row[1], 'squared_l2')
+            descriptor, generation, state = self.index_catalog.resolve_head(connection, snapshot)
+            complete = dict(public, index_publication_version=1, publication_generation=generation,
+                            published_index=descriptor.to_dict() if descriptor else None, published_index_state=state)
+            self.leases[token] = (connection, time.monotonic() + ttl, complete)
+            return complete if include_publication else public
         except Exception:
             connection.close()
             raise
@@ -329,6 +338,8 @@ class Database:
 
     def _end_read(self, token):
         self._candidate_plans.pop(token,None)
+        self._snapshot_digests.pop(token, None)
+        self.index_catalog.abort_lease(token)
         lease = self.leases.pop(token, None)
         if lease:
             lease[0].execute("ROLLBACK")
@@ -338,6 +349,44 @@ class Database:
         for token, (_, expires, _) in list(self.leases.items()):
             if expires <= time.monotonic():
                 self._end_read(token)
+
+    def _publication_lease(self, token):
+        from vecstor.index.artifact import ArtifactError
+        item = self.leases.get(token)
+        if item is None or item[1] <= time.monotonic():
+            raise ArtifactError('FAILED_PRECONDITION', 'Read lease unavailable or expired')
+        return item[2], self._snapshot_digests.get(token)
+
+    def _leased_index(self, token):
+        return self._publication_lease(token)[0]
+
+    def _record_snapshot_digest(self, token, digest, row_count):
+        from vecstor.index.artifact import require
+        lease, existing = self._publication_lease(token)
+        require(row_count == lease['row_count'] and isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest), 'invalid_snapshot_receipt', 'DATA_LOSS')
+        require(existing is None or existing == digest, 'snapshot_receipt_changed', 'DATA_LOSS')
+        self._snapshot_digests[token] = digest
+
+    def _begin_index_publication(self, token, operation_id, config, generation, intent):
+        return self.index_catalog.begin(self._publication_lease(token)[0], operation_id, config, generation, intent)
+
+    def _bind_index_upload(self, operation_id, descriptor):
+        return self.index_catalog.bind_upload(operation_id, descriptor)
+
+    def _index_phase(self, operation_id, phase):
+        return self.index_catalog.set_phase(operation_id, phase)
+
+    def _commit_index_publication(self, operation_id, descriptor, token):
+        return self.index_catalog.commit(operation_id, descriptor, token, self._check_time)
+
+    def _get_index_publication(self, operation_id):
+        return self.index_catalog.get_operation(operation_id)
+
+    def _fail_index_publication(self, operation_id, code, reason):
+        return self.index_catalog.fail(operation_id, code, reason)
+
+    def _list_index_artifacts(self, table_id=None, limit=128, cursor=''):
+        return self.index_catalog.list_artifacts(table_id, limit, cursor)
 
     def close(self):
         def shutdown():
