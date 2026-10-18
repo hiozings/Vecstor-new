@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from dataclasses import asdict
 import json
 import time
+import uuid
 
 import grpc
 
@@ -107,7 +108,7 @@ class IndexPublicationManager:
             finally: io.close()
 
     def load(self, request, context):
-        require(request.device in ('', 'cpu') and request.gpu_id == 0, 'artifact_load_device_unsupported', 'FAILED_PRECONDITION')
+        require(request.device in ('', 'cpu','gpu') and request.gpu_id == 0, 'artifact_load_device_unsupported', 'FAILED_PRECONDITION')
         with self.maintenance():
             io = self._io(request, context)
             try:
@@ -116,30 +117,73 @@ class IndexPublicationManager:
                 descriptor = self._lease_descriptor(lease)
                 require(not request.expected_artifact_id or request.expected_artifact_id == descriptor.artifact_id,
                         'expected_artifact_mismatch', 'FAILED_PRECONDITION')
-                statistics = dict(trained=False, artifact_download_bytes=0, snapshot_calls=0, counts=io.trace['counts'])
-                with self.registry.acquire_exact(descriptor.key, descriptor.artifact_id) as existing:
-                    if existing:
-                        return dict(descriptor=descriptor, publication_generation=lease.publication_generation,
-                                    device='cpu', reused=True, statistics=statistics)
-                self.registry.check_artifact_slot(descriptor)
-                try: self.registry.prepare_build(descriptor.key, working_bytes(descriptor), check=io.remaining)
-                except ValueError as error: raise ArtifactError('RESOURCE_EXHAUSTED', str(error)) from error
-                started = time.monotonic()
-                frames = io.stream(self.stub.DownloadIndexArtifact, pb.DownloadIndexArtifactRequest(
-                    database_id=request.database_id, token=lease.token, artifact_id=descriptor.artifact_id))
-                _, payload = read_artifact_frames(frames, request.database_id, lease.token, descriptor, io.remaining)
-                statistics.update(artifact_download_bytes=len(payload), download_ms=(time.monotonic()-started)*1000)
-                started = time.monotonic()
-                handle = validate_artifact(payload, descriptor)
-                io.remaining()
-                statistics['deserialize_ms'] = (time.monotonic()-started)*1000
-                try: self.registry.publish_artifact(descriptor, handle, request.table,
-                    dict(source='published', publication_generation=lease.publication_generation), io.remaining)
-                except ArtifactError: raise
-                except ValueError as error: raise ArtifactError('RESOURCE_EXHAUSTED', str(error)) from error
+                statistics = dict(trained=False, artifact_download_bytes=0, snapshot_calls=0, gpu_cloned=False, counts=io.trace['counts'])
+                reused = self._load_cpu(io, request, descriptor, statistics)
+                if request.device=='gpu': reused = self._load_gpu(io, request, descriptor, statistics)
                 return dict(descriptor=descriptor, publication_generation=lease.publication_generation,
-                            device='cpu', reused=False, statistics=statistics)
+                            device=request.device or 'cpu', reused=reused, statistics=statistics)
             finally: io.close()
+
+    def _load_cpu(self, io, request, descriptor, statistics):
+        with self.registry.acquire_exact(descriptor.key, descriptor.artifact_id) as existing:
+            if existing: return True
+        self.registry.check_artifact_slot(descriptor)
+        try: self.registry.prepare_build(descriptor.key, working_bytes(descriptor), check=io.remaining)
+        except ValueError as error: raise ArtifactError('RESOURCE_EXHAUSTED', str(error)) from error
+        started = time.monotonic()
+        frames = io.stream(self.stub.DownloadIndexArtifact, pb.DownloadIndexArtifactRequest(
+            database_id=request.database_id, token=io.lease.token, artifact_id=descriptor.artifact_id))
+        _, payload = read_artifact_frames(frames, request.database_id, io.lease.token, descriptor, io.remaining)
+        statistics.update(artifact_download_bytes=len(payload), download_ms=(time.monotonic()-started)*1000)
+        started = time.monotonic()
+        handle = validate_artifact(payload, descriptor)
+        io.remaining()
+        statistics['deserialize_ms'] = (time.monotonic()-started)*1000
+        try: self.registry.publish_artifact(descriptor, handle, request.table,
+            dict(source='published', publication_generation=io.lease.publication_generation), io.remaining)
+        except ArtifactError: raise
+        except ValueError as error: raise ArtifactError('RESOURCE_EXHAUSTED', str(error)) from error
+        return False
+
+    def _load_gpu(self, io, request, descriptor, statistics):
+        from vecstor.index.gpu_backend import GpuIndex
+        from vecstor.index.gpu_worker import GpuError, GpuDataError
+        with self.registry.acquire_exact(descriptor.key, descriptor.artifact_id) as cpu:
+            require(cpu is not None, 'published_cpu_index_not_loaded', 'FAILED_PRECONDITION')
+            with self.gpu_registry.acquire_exact(descriptor.key, descriptor.artifact_id) as existing:
+                if existing:
+                    try:
+                        actual = self.gpu_worker.verify_replica(existing.handle.token,io.deadline,cancelled=lambda:not io.context.is_active())
+                        if any(actual.get(name)!=getattr(cpu.handle,name) for name in ('row_count','dimension','nlist')):
+                            raise GpuDataError('GPU artifact replica metadata mismatch')
+                        return True
+                    except GpuError as error:
+                        reason = str(error)
+                        if reason not in ('gpu_replica_missing','gpu_worker_generation_changed') and not reason.startswith('gpu_worker_failed: '):raise
+                        if self.gpu_worker.generation==existing.handle.worker_generation:self.gpu_worker.reset()
+            self.gpu_registry.check_artifact_slot(descriptor)
+            self.gpu_registry.reserve(cpu.handle.byte_size)
+            token = uuid.uuid4().hex
+            generation = self.gpu_worker.generation
+            published = False
+            started = time.monotonic()
+            try:
+                stats = self.gpu_worker.submit_clone(token,cpu.handle.serialize(),io.deadline,cancelled=lambda:not io.context.is_active())
+                if any(stats.get(name)!=getattr(cpu.handle,name) for name in ('row_count','dimension','nlist')):
+                    raise GpuDataError('GPU artifact clone metadata mismatch')
+                io.remaining()
+                require(generation==self.gpu_worker.generation,'gpu_worker_generation_changed','FAILED_PRECONDITION')
+                handle = GpuIndex(self.gpu_worker,token,cpu.handle,generation,descriptor.artifact_id)
+                for name in ('row_count','dimension','nlist'):stats.pop(name,None)
+                stats.update(device='gpu',gpu_id=0,precision='float32',worker_generation=generation,source='published')
+                self.gpu_registry.publish_artifact(descriptor,handle,request.table,stats,io.remaining)
+                published = True
+                statistics.update(gpu_cloned=True,gpu_clone_ms=(time.monotonic()-started)*1000,worker_generation=generation)
+                return False
+            finally:
+                if not published:
+                    try:self.gpu_worker.release(token)
+                    except (ValueError,RuntimeError):pass
 
     def inspect(self, request, context):
         io = self._io(request, context)

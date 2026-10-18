@@ -92,9 +92,9 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                 if entry:
                     try:
                         if quality_catalog is None:raise QualityUnavailable('quality_profile_missing')
-                        if index_source=='published':raise QualityUnavailable('quality_profile_artifact_unbound')
                         options,description=quality_catalog.resolve(options.quality_profile_id,entry.key,entry.handle.nlist,
-                                                                    entry.handle.row_count,plan,replace(options,device=device),execution=entry.statistics)
+                                                                    entry.handle.row_count,plan,replace(options,device=device),execution=entry.statistics,
+                                                                    artifact=entry.descriptor,index_source=index_source)
                         trace['quality_profile']=description
                     except QualityUnavailable as error:
                         quality_problem=error.reason
@@ -103,7 +103,7 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                             entry=cpu_entry;device='cpu';trace['index']=entry.describe()
                             try:
                                 options,description=quality_catalog.resolve(options.quality_profile_id,entry.key,entry.handle.nlist,
-                                    entry.handle.row_count,plan,replace(options,device='cpu'))
+                                    entry.handle.row_count,plan,replace(options,device='cpu'),artifact=entry.descriptor,index_source=index_source)
                                 trace['quality_profile']=description;quality_problem=None
                             except QualityUnavailable as cpu_error:quality_problem=cpu_error.reason
                         if quality_problem:trace['quality_profile'].update(state='unavailable',reason=quality_problem)

@@ -15,8 +15,9 @@ class GpuReplicaKey:
 
 
 class GpuIndex:
-    def __init__(self,worker,token,cpu,worker_generation):
+    def __init__(self,worker,token,cpu,worker_generation,artifact_id=None):
         self.worker=worker;self.token=token;self.worker_generation=worker_generation
+        self.artifact_id=artifact_id
         for name in ('dimension','nlist','row_count','byte_size','max_abs','ids'):setattr(self,name,getattr(cpu,name))
 
     def search(self,query,count,nprobe,*,deadline,cancelled=lambda:False,statistics=None,**kwargs):

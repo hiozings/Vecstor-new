@@ -121,10 +121,15 @@ class SQLComputeService(rpc.SQLComputeServicer):
         return pb.ControlResponse(json_result=json.dumps({'server_instance_id':self.server_instance_id,'fused_candidates':self.fused_candidates,'candidate_data_paths':['separate','fused'] if self.fused_candidates else ['separate'],'ann':True,'algorithm':'cpu_ivfflat',
             'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':True,'gpu_paths':['search-first'],'gpu_max_search_k':2048,'gpu_max_nprobe':2048,
             'execution_settings_version':1,'index_devices_version':1,'index_publication_version':1,
-            'index_source':getattr(self,'index_source','local'),'quality_profiles':self.quality_catalog.list()}))
+            'index_source':getattr(self,'index_source','local'),'quality_profile_versions':[1,2,3],'quality_profiles':self.quality_catalog.list()}))
 
     def _index_error(self, context, error):
         from vecstor.index.artifact import ArtifactError
+        from vecstor.index.gpu_worker import GpuError
+        if isinstance(error,GpuDataError):context.abort(grpc.StatusCode.DATA_LOSS,str(error))
+        if isinstance(error,GpuError):
+            code=grpc.StatusCode.RESOURCE_EXHAUSTED if any(word in str(error) for word in ('queue_full','budget','memory')) else grpc.StatusCode.FAILED_PRECONDITION
+            context.abort(code,str(error))
         if isinstance(error, RemoteError): context.abort(error.code, error.details)
         if isinstance(error, grpc.RpcError): context.abort(error.code(), error.details())
         if isinstance(error, ArtifactError): context.abort(getattr(grpc.StatusCode, error.code), str(error))
@@ -146,7 +151,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
             return pb.LoadIndexResponse(descriptor=descriptor_to_proto(output['descriptor']),
                 publication_generation=output['publication_generation'], device=output['device'], reused=output['reused'],
                 statistics_json=json.dumps(output['statistics']))
-        except (ValueError, OSError, grpc.RpcError, RemoteError) as error: self._index_error(context, error)
+        except (ValueError, OSError, grpc.RpcError, RemoteError, GpuDataError) as error: self._index_error(context, error)
 
     def InspectPublishedIndex(self, request, context):
         from vecstor.rpc.index_codec import descriptor_to_proto

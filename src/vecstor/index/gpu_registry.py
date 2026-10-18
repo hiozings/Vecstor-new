@@ -39,6 +39,21 @@ class GpuRegistry(IndexRegistry):
     def reactivate(self,key,check=None):
         self._sync();return super().reactivate(key,check)
 
+    @contextmanager
+    def acquire_exact(self,key,artifact_id):
+        self._sync()
+        with super().acquire_exact(key,artifact_id) as entry:
+            if entry:
+                with self._lock:self._entries.move_to_end(key)
+            yield entry
+
+    def publish_artifact(self,descriptor,handle,table,statistics,check):
+        from .artifact import require
+        self._sync()
+        require(handle.artifact_id==descriptor.artifact_id and handle.worker_generation==self.worker.generation,
+                'gpu_artifact_generation_mismatch','FAILED_PRECONDITION')
+        return super().publish_artifact(descriptor,handle,table,statistics,check)
+
     def list(self,database_id='',table=''):
         self._sync();return super().list(database_id,table)
 

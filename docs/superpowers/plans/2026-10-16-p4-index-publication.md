@@ -204,12 +204,12 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 - `QualityCatalog.resolve(..., execution=None, artifact: ArtifactDescriptor | None=None, index_source='local')`：local v1/v2行为不变；published必须v3且三个artifact_identity字段全匹配。
 - `validate_artifact_quality.run(calibration_dir: Path, compute_address: str, database: str, table: str, output_dir: Path, device: str) -> dict`：读取既有冻结配置/完整留出集，校验真实数据指纹与快照绑定，验证当前发布工件；不重调参、不创建新训练；输出v3配置与逐查询证据。
 
-- [ ] 写失败测试：`test_same_key_wrong_artifact_profile_rejected`、`test_v2_profile_rejected_only_in_published_mode`、`test_gpu_restore_clones_loaded_cpu_without_training`、`test_gpu_fallback_cannot_choose_other_artifact`、`test_dead_worker_reload_preserves_published_cpu`。
-- [ ] 运行单元测试确认失败；实现v3严格字段校验、CPU gpu_model=`not_applicable`、能力版本与明确失败原因。
-- [ ] 实现GPU load复用既有worker协议，绑定来源artifact且维持generation校验，不扩展GPU检索范围或取消模型。
-- [ ] 实现质量验证工具，正式证据至少200校准/500留出，零不完整/零精确回退，固定已有质量门槛；输入数据身份/参数/摘要不一致则拒绝，已见留出标记一致性回归。工具不能仅复制旧summary再写新hash。
-- [ ] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_artifact_quality_policy.py tests/unit/test_quality_policy.py tests/unit/test_gpu_quality.py`；真实GPU运行 `VECSTOR_REQUIRE_GPU=1 conda run -n vecstor python -m pytest -q tests/integration/test_p4_gpu_restore.py tests/integration/test_gpu_execution.py`。
-- [ ] 新工具先以小fixture验证“样本不足不导出”，正式500条工件证据随T9归档；授权时提交 `feat: bind restored GPU replicas and quality profiles to artifacts`。
+- [x] 写失败测试：`test_same_key_wrong_artifact_profile_rejected`、`test_v2_profile_rejected_only_in_published_mode`、`test_gpu_restore_clones_loaded_cpu_without_training`、`test_gpu_fallback_cannot_choose_other_artifact`、`test_dead_worker_reload_preserves_published_cpu`。
+- [x] 运行单元测试确认失败；实现v3严格字段校验、CPU gpu_model=`not_applicable`、能力版本与明确失败原因。
+- [x] 实现GPU load复用既有worker协议，绑定来源artifact且维持generation校验，不扩展GPU检索范围或取消模型。
+- [x] 实现质量验证工具，正式证据至少200校准/500留出，零不完整/零精确回退，固定已有质量门槛；输入数据身份/参数/摘要不一致则拒绝，已见留出标记一致性回归。工具不能仅复制旧summary再写新hash。
+- [x] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_artifact_quality_policy.py tests/unit/test_quality_policy.py tests/unit/test_gpu_quality.py`；真实GPU运行 `VECSTOR_REQUIRE_GPU=1 conda run -n vecstor python -m pytest -q tests/integration/test_p4_gpu_restore.py tests/integration/test_gpu_execution.py`。
+- [x] 新工具先以小fixture验证“样本不足不导出”，正式500条工件证据随T9归档；授权时提交 `feat: bind restored GPU replicas and quality profiles to artifacts`。
 
 ## Task 8：启动恢复、旧版本回收与终端命令
 
@@ -297,3 +297,5 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 - 补注册后清除PYTHONPATH的真实GPU完整回归632通过（180.97秒）。T5计算发布/加载与精确工件引用完成，含取消回收，41项定向回归通过；T6—T9继续。CPU加载在确认存储验证和字节摘要后使用现有父进程原生解码方式，设计7.2已说明该取舍与故障范围。
 
 - T6双节点published执行绑定完成；30项回归通过（18.64秒），含旧读跨版本、同revision换配置、缺副本/损坏拒绝、客户端错误工件/版本完成帧拒绝。T7—T9继续。
+
+- T7 GPU工件来源与v3质量配置完成；47项后端/质量/旧GPU测试通过（35.96秒），6项验证工具/工件质量边界测试通过（1.55秒）。完整500留出正式证据按计划留至T9，不将负面工具测试当作正式质量通过。
