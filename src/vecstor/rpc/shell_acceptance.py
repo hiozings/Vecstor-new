@@ -15,13 +15,15 @@ import grpc
 from vecstor.datasets import generate_dataset, save_dataset
 from vecstor.query.engine import LocalEngine
 from vecstor.rpc.acceptance import ServiceProcess
-from vecstor.rpc.common import RemoteError
+from vecstor.rpc.common import RemoteError, positive_timeout
 from vecstor.rpc.sql_client import SessionClient
 
 
 class TerminalProcess:
     """Drive the real prompt_toolkit terminal through a PTY, retaining all output."""
-    def __init__(self, address, transcript):
+    def __init__(self, address, transcript, request_timeout=15, command_timeout=30):
+        request_timeout=positive_timeout(request_timeout)
+        self.command_timeout=positive_timeout(command_timeout)
         self.transcript = transcript
         self.output = bytearray()
         self.pending = bytearray()
@@ -31,7 +33,7 @@ class TerminalProcess:
                    PYTHONDONTWRITEBYTECODE='1', OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1')
         self.process = None
         try:
-            self.process = subprocess.Popen([sys.executable, str(script), '--compute', address],
+            self.process = subprocess.Popen([sys.executable, str(script), '--compute', address, '--timeout', str(request_timeout)],
                 stdin=slave, stdout=slave, stderr=slave, env=env, close_fds=True)
             os.close(slave)
             slave = None
@@ -64,9 +66,9 @@ class TerminalProcess:
         os.write(self.master, b'\x1b[200~' + text.encode() + b'\x1b[201~\r')
         # Wait for this editor to finish and the next one to start. A prompt
         # echoed during redraw is not proof that the RPC has finished.
-        self.expect('\x1b[?2004l')
-        self.expect('\x1b[?2004h')
-        self.expect(prompt)
+        self.expect('\x1b[?2004l',timeout=self.command_timeout)
+        self.expect('\x1b[?2004h',timeout=self.command_timeout)
+        self.expect(prompt,timeout=self.command_timeout)
 
     def quit(self):
         os.write(self.master, b'.quit\r')

@@ -93,7 +93,7 @@ def run_acceptance(output_dir, rows=10000, dimension=128, seed=20261016, require
                 client.open_database('demo')
                 return client
             bootstrap=compute_start('bootstrap')
-            terminal=TerminalProcess(bootstrap.address,output/'session.txt');cleanup.callback(terminal.stop);terminals.append(terminal.process)
+            terminal=TerminalProcess(bootstrap.address,output/'session.txt',request_timeout=180,command_timeout=180);cleanup.callback(terminal.stop);terminals.append(terminal.process)
             for command in ('.open demo --create','.mode json','.import source.npz items',
                             f'.index publish items --nlist {nlist} --operation-id first --timeout 60'):
                 terminal.command(command)

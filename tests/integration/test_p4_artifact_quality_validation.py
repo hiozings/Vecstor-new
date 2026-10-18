@@ -33,3 +33,12 @@ def test_actual_metadata_fingerprint_is_verified_before_export(cluster, tmp_path
     with pytest.raises(ValueError, match='dataset|fingerprint'):
         runner()(source, address, 'demo', 'items', output, 'cpu')
     assert not (output/'quality-profiles.json').exists()
+
+
+def test_frozen_faiss_version_must_match_published_backend(cluster,tmp_path):
+    source=tmp_path/'cal';scenario=source/'2048-independent';scenario.mkdir(parents=True)
+    (source/'config.json').write_text(json.dumps({'calibration_count':200,'evaluation_count':500,'faiss':'0.0'}))
+    save_dataset(cluster.data,scenario/'dataset.npz')
+    publish(cluster);load(cluster)
+    with pytest.raises(ValueError,match='Faiss'):
+        runner()(source,cluster.clients['A'].address,'demo','items',tmp_path/'out','cpu')

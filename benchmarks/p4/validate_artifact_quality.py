@@ -62,6 +62,7 @@ def run(calibration_dir, compute_address, database, table, output_dir, device,
                 if saved.size==data.size and saved.dimension==data.dimension and helper['dataset_digest'](saved)==fingerprint:
                     candidates.append(candidate.parent)
             if len(candidates)!=1:raise ValueError('Actual dataset fingerprint does not uniquely match calibration data')
+            if config.get('faiss')!=descriptor.faiss_version:raise ValueError('Frozen Faiss version differs from published backend')
             scenario = candidates[0]
             distribution = scenario.name.split('-',1)[1]
             filename = f'{selectivity:g}-k{k}.json' if device=='gpu' else f'{selectivity:g}-{path}.json'
@@ -75,6 +76,8 @@ def run(calibration_dir, compute_address, database, table, output_dir, device,
                 raise ValueError('Published artifact build configuration differs from frozen calibration')
             with np.load(scenario/'queries.npz',allow_pickle=False) as arrays:
                 calibration, evaluation = arrays['calibration'], arrays['evaluation']
+            if calibration.dtype!=np.dtype('float32') or evaluation.dtype!=np.dtype('float32'):
+                raise ValueError('Frozen query arrays must preserve float32 identity')
             if calibration.shape!=(config['calibration_count'],data.dimension) or evaluation.shape!=(config['evaluation_count'],data.dimension):
                 raise ValueError('Query split shape mismatch')
             if not np.isfinite(calibration).all() or not np.isfinite(evaluation).all() or min(calibration.min(),evaluation.min())<0 or max(calibration.max(),evaluation.max())>1:
