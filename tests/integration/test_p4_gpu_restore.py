@@ -1,4 +1,5 @@
 import json
+import grpc
 import pytest
 
 from vecstor.rpc import sql_pb2 as pb
@@ -42,3 +43,12 @@ def test_gpu_fallback_cannot_choose_other_artifact(cluster):
     load(cluster)
     result = cluster.clients['A'].execute(GPU_SQL+",device_fallback='cpu'")
     assert result['execution_plan']['actual_device'] == 'cpu'
+
+
+def test_published_gpu_budget_failure_is_resource_exhausted(cluster):
+    publish(cluster)
+    cluster.engines['A'].index_manager.gpu_registry.max_bytes=1
+    with pytest.raises(grpc.RpcError) as error:load(cluster,device='gpu')
+    assert error.value.code()==grpc.StatusCode.RESOURCE_EXHAUSTED
+    inspection=cluster.stubs['A'].InspectPublishedIndex(pb.InspectPublishedIndexRequest(database_id=cluster.dbid,table='items'),timeout=5)
+    assert inspection.cpu_ready and not inspection.gpu_ready

@@ -162,7 +162,8 @@ class IndexPublicationManager:
                         if reason not in ('gpu_replica_missing','gpu_worker_generation_changed') and not reason.startswith('gpu_worker_failed: '):raise
                         if self.gpu_worker.generation==existing.handle.worker_generation:self.gpu_worker.reset()
             self.gpu_registry.check_artifact_slot(descriptor)
-            self.gpu_registry.reserve(cpu.handle.byte_size)
+            try:self.gpu_registry.reserve(cpu.handle.byte_size)
+            except ValueError as error:raise ArtifactError('RESOURCE_EXHAUSTED',str(error)) from error
             token = uuid.uuid4().hex
             generation = self.gpu_worker.generation
             published = False

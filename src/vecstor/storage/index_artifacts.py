@@ -35,14 +35,16 @@ class Upload:
 
 
 class ArtifactStore:
-    def __init__(self, root, max_artifact_bytes=MAX_ARTIFACT_BYTES, max_total_bytes=2*1024**3, min_free_bytes=256*1024**2):
+    def __init__(self, root, max_artifact_bytes=MAX_ARTIFACT_BYTES, max_total_bytes=2*1024**3, min_free_bytes=256*1024**2,max_verify_bytes=512*1024**2):
         root = Path(root)
         require(not root.is_symlink(), 'artifact_root_symlink')
-        for value in (max_artifact_bytes, max_total_bytes): require(type(value) is int and value > 0, 'invalid_artifact_budget')
+        for value in (max_artifact_bytes, max_total_bytes,max_verify_bytes): require(type(value) is int and value > 0, 'invalid_artifact_budget')
+        require(max_artifact_bytes<=MAX_ARTIFACT_BYTES,'artifact_format_v1_limit_exceeded')
         require(type(min_free_bytes) is int and min_free_bytes >= 0, 'invalid_disk_margin')
         root.mkdir(parents=True, exist_ok=True)
         self.root = root.resolve()
         self.max_artifact_bytes, self.max_total_bytes, self.min_free_bytes = max_artifact_bytes, max_total_bytes, min_free_bytes
+        self.max_verify_bytes=max_verify_bytes
         self.lock = RLock()
         self._verifier = BoundedSemaphore(1)
         self._cleanup = ThreadPoolExecutor(max_workers=1, thread_name_prefix='vecstor-artifact-cleanup')
@@ -135,7 +137,7 @@ class ArtifactStore:
                 require(upload.alive and upload.sealed, 'artifact_not_sealed', 'FAILED_PRECONDITION')
                 descriptor = upload.descriptor
                 require(descriptor.snapshot_sha256 == snapshot_digest, 'publication_snapshot_receipt_mismatch', 'DATA_LOSS')
-                verify_in_worker(upload.path, descriptor, deadline, cancelled)
+                verify_in_worker(upload.path, descriptor, deadline, cancelled,self.max_verify_bytes)
                 if cancelled(): raise InterruptedError('artifact installation cancelled')
                 if time.monotonic() >= deadline: raise TimeoutError('artifact installation deadline exceeded')
                 parent = self._directory('objects', descriptor.key.database_id)
@@ -243,6 +245,7 @@ class ArtifactStore:
         with self.lock:
             require(not self._pins.get(descriptor.artifact_id), 'artifact_pinned', 'RESOURCE_EXHAUSTED')
             self._deleting.add(descriptor.artifact_id)
+        completed=False
         try:
             path = self._object(descriptor)
             size = sum(p.stat().st_size for p in path.iterdir()) if path.exists() else 0
@@ -251,6 +254,17 @@ class ArtifactStore:
             with self.lock:
                 self._ready.pop(descriptor.artifact_id, None)
                 self._stored -= size
+            completed=True
             return size
         finally:
-            with self.lock: self._deleting.discard(descriptor.artifact_id)
+            if completed:
+                with self.lock: self._deleting.discard(descriptor.artifact_id)
+
+    def mark_retired(self, descriptors):
+        with self.lock:
+            require(not any(self._pins.get(d.artifact_id) for d in descriptors),'artifact_pinned','RESOURCE_EXHAUSTED')
+            self._deleting.update(d.artifact_id for d in descriptors)
+
+    def unmark_retired(self, descriptors):
+        with self.lock:
+            self._deleting.difference_update(d.artifact_id for d in descriptors)

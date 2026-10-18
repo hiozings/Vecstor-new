@@ -117,7 +117,7 @@ GPU ANN 已按计划接入：SQL SETTINGS逐请求选择CPU/GPU、显式GPU副�
 
 GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复用查询能力并拆分计时，提供可选候选过滤/向量合并RPC（默认关闭、SQL可覆盖）。原生batch1/4/8探测完成；native占比低且GPU排队短，本轮不部署运行时批调度、批内取消或二进制IPC。自动策略/持久版本/GPU覆盖扩展仍分别留给G3—G5/P4。见 [改进验收](docs/validation/gpu-improvements.md)、[问题分析](docs/design/gpu-improvement-analysis.md) 和 [执行计划](docs/superpowers/plans/2026-10-15-gpu-improvements.md)。
 
-P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publication.md)和[九任务实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)，2026-10-17开始实施：T1已增加原生CPU工件格式、完整身份及规范ID/向量摘要校验，52项工件/Faiss定向测试通过；T2已增加目录事务/CAS/读租约绑定并通过35项定向测试；T3已实现工件文件/容量预留/独立校验并通过34项定向测试；T4已接入存储发布/分发RPC，阶段完整真实GPU回归623通过；T5计算侧显式发布/零训练加载与工件引用已完成并通过41项定向测试；T6双节点published执行绑定与完成帧确认已通过30项定向测试；T7 GPU工件恢复/v3质量绑定已通过47项后端回归和6项工具边界检查，正式500留出证据留T9；T8运维恢复与T9正式验收继续。拟采用计算侧显式构建、存储侧校验/持久发布、读租约绑定权威工件、双计算节点显式加载与零训练重启恢复；包含批量写入后的完整重建发布、故障注入、旧版本回收、GPU重克隆及质量工件绑定。保留数据库级revision；数据缓存、自适应策略、表级版本和增量维护另行推进。规划中的命令、协议与验收脚本尚不可用，不代表P4验收完成。
+P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publication.md)和[九任务实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)，2026-10-17开始实施：T1已增加原生CPU工件格式、完整身份及规范ID/向量摘要校验，52项工件/Faiss定向测试通过；T2已增加目录事务/CAS/读租约绑定并通过35项定向测试；T3已实现工件文件/容量预留/独立校验并通过34项定向测试；T4已接入存储发布/分发RPC，阶段完整真实GPU回归623通过；T5计算侧显式发布/零训练加载与工件引用已完成并通过41项定向测试；T6双节点published执行绑定与完成帧确认已通过30项定向测试；T7 GPU工件恢复/v3质量绑定已通过47项后端回归和6项工具边界检查，正式500留出证据留T9；T8恢复/GC/预加载/终端已接入，阶段完整真实GPU回归664通过，后补边界39项及实际崩溃/墓碑6项通过；T9正式规模、成本与质量验收继续。拟采用计算侧显式构建、存储侧校验/持久发布、读租约绑定权威工件、双计算节点显式加载与零训练重启恢复；包含批量写入后的完整重建发布、故障注入、旧版本回收、GPU重克隆及质量工件绑定。保留数据库级revision；数据缓存、自适应策略、表级版本和增量维护另行推进。已接入命令见[索引使用说明](docs/p4-indexes.md)；正式验收脚本与完整交付尚在T9，不代表全部P4完成。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -164,10 +164,10 @@ P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publi
 │   ├── cli.py            # 命令行参数和产物输出
 │   ├── isolation.py      # 计算进程 Landlock 权限与拒绝读取探针
 │   ├── storage/          # service.py兼容P2；catalog/database/sql_service管理库/事务/租约，index_catalog/index_artifacts/index_service管理索引目录、工件与发布RPC
-│   ├── compute/          # P2 RemoteEngine、v2路由/执行、lease_io/index_manager与index_publication显式发布加载
+│   ├── compute/          # P2 RemoteEngine、v2路由/执行、lease_io/index_manager与index_publication/index_recovery显式发布加载及预热
 │   ├── index/            # CPU工件格式/摘要校验、GPU worker/副本、CPU IVF、快照键、有界registry与构建进程
 │   ├── rpc/              # v1/v2 协议、能力缓存会话客户端、timing接入计时、类型化结果、生命周期和验收
-│   ├── shell/            # app/buffer/commands/render/completion：交互界面及分句
+│   ├── shell/            # app/buffer/commands/index_commands/render/completion：交互界面、索引生命周期与分句
 │   └── query/
 │       ├── __init__.py
 │       ├── parser.py     # SQL AST 白名单、参数化过滤计划
@@ -194,6 +194,7 @@ P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publi
 │   ├── sql-shell.md      # P2.5 安装入口、界面、SQL 范围与使用方法
 │   ├── gpu-search.md     # GPU SQL、设备/资源、质量和故障说明
 │   ├── p3-search.md      # ANN 命令、资源/版本语义与实验复现
+│   ├── p4-indexes.md     # 持久工件发布/加载、双节点、重启预热与回收
 │   ├── design/data-and-query-spec.md # P1 数据与查询契约
 │   ├── design/p2-grpc.md  # P2 协议、快照与隔离设计
 │   ├── design/interactive-sql-shell.md # P2.5 终端与可写数据库设计

@@ -24,6 +24,13 @@ End SQL with ; then Enter. Multiple statements commit independently.
 .index build TABLE [--nlist N] [--timeout S] [--device cpu|gpu] [--gpu-id 0]
                          Explicitly build CPU index / GPU replica
 .index list|clear [TABLE] Inspect/clear compute indexes
+.index publish TABLE [--nlist N] [--operation-id ID] [--timeout S]
+.index load TABLE [--device cpu|gpu] [--artifact-id ID] [--timeout S]
+.index inspect TABLE     Compare published artifact and local readiness
+.index published [TABLE] [--limit N] [--cursor ID]
+.index publication-status OPERATION_ID
+.index prune [--keep-last N] [--execute --operation-id ID]
+                         Preview by default; clear never deletes stored artifacts
 .plan on|off              Toggle detailed execution plans
 EXPLAIN [ANALYZE] SELECT  Explain a vector SELECT
 .clear / .quit            Clear input / exit
@@ -36,7 +43,7 @@ def dispatch(shell, text):
     parts = shlex.split(text)
     command, args = parts[0], parts[1:]
     arities = {'.help': (0,), '.databases': (0,), '.open': (1, 2), '.datasets': (0,), '.import': (2,), '.tables': (0,), '.schema': (0, 1), '.status': (1,), '.mode': (1,), '.timer': (1,), '.clear': (0,), '.quit': (0,), '.search': (0, 1, 2), '.index': (1, 2, 3, 4, 6, 8, 10), '.plan': (1,)}
-    if command not in arities or len(args) not in arities[command]:
+    if command not in arities or (command!='.index' and len(args) not in arities[command]):
         raise ValueError('Unknown command or invalid arguments. Use .help.')
     client = shell.client
     if command == '.search':
@@ -56,25 +63,8 @@ def dispatch(shell, text):
             raise ValueError('Usage: .plan on|off')
         shell.show_plan = args[0] == 'on'
     elif command == '.index':
-        action = args[0]
-        if action == 'list' and len(args)<=2:
-            result=client.list_indexes(args[1] if len(args)==2 else '')
-        elif action=='clear':
-            rest=args[1:];table=rest.pop(0) if rest and not rest[0].startswith('--') else ''
-            if rest and (len(rest)!=2 or rest[0]!='--device' or rest[1] not in ('cpu','gpu')):
-                raise ValueError('Usage: .index clear [TABLE] [--device cpu|gpu]')
-            result=client.clear_indexes(table,device=rest[1] if rest else '')
-        elif action == 'build' and len(args) >= 2:
-            options = {}
-            for index in range(2, len(args), 2):
-                key = args[index]
-                if key not in ('--nlist', '--timeout', '--device', '--gpu-id') or key in options:
-                    raise ValueError('Usage: .index build TABLE [--nlist N] [--timeout S]')
-                options[key] = args[index + 1]
-            result = client.build_index(args[1], nlist=int(options['--nlist']) if '--nlist' in options else None,
-                                        timeout=float(options.get('--timeout', 45)),device=options.get('--device','cpu'),gpu_id=int(options.get('--gpu-id',0)))
-        else:
-            raise ValueError('Usage: .index build TABLE [--nlist N] [--timeout S] | list/clear [TABLE]')
+        from .index_commands import execute_index
+        result=execute_index(client,args)
         render_result(shell.console, result, shell.mode)
     elif command == '.help':
         shell.console.print(HELP, markup=False)

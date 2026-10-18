@@ -38,6 +38,7 @@ class IndexPublicationService:
     def __init__(self, catalog, store, stream_slots):
         self.catalog, self.store, self.stream_slots = catalog, store, stream_slots
         self._slots = BoundedSemaphore(2)
+        self._prune_slot = BoundedSemaphore(1)
 
     @contextmanager
     def heavy(self):
@@ -169,4 +170,50 @@ class IndexPublicationService:
         except (ValueError, OSError, TimeoutError) as error: abort(context, error)
 
     def PruneIndexArtifacts(self, request, context):
-        context.abort(grpc.StatusCode.UNIMPLEMENTED, 'Index pruning is not enabled yet')
+        acquired=False
+        try:
+            with self.heavy():
+                acquired=self._prune_slot.acquire(blocking=False)
+                require(acquired,'index_prune_busy','RESOURCE_EXHAUSTED')
+                keep=request.keep_last if request.HasField('keep_last') else 2
+                dry=request.dry_run if request.HasField('dry_run') else True
+                result=self.call(request.database_id,'begin_index_prune',context,request.operation_id or None,keep,dry)
+                if not dry:result=self._finish_prune(request.database_id,request.operation_id,context)
+                return pb.PruneIndexArtifactsResponse(candidates=result.candidates,protected=result.protected,deleted=result.deleted,
+                    deleted_bytes=result.deleted_bytes,state='DRY_RUN' if dry else 'COMMITTED',byte_accounting='logical_payload_and_manifest')
+        except (ValueError,OSError,TimeoutError) as error:abort(context,error)
+        finally:
+            if acquired:self._prune_slot.release()
+
+    def _finish_prune(self,database_id,operation_id,context):
+        from vecstor.index.artifact import PruneResult
+        record=self.call(database_id,'get_index_publication',context,operation_id)
+        require(record is not None and record.operation_kind=='PRUNE','unknown_prune_operation','NOT_FOUND')
+        for identity in record.result['candidates']:
+            if identity in record.result['deleted']:continue
+            remaining(context)
+            descriptor=self.call(database_id,'index_artifact',context,identity)
+            self.store.mark_retired([descriptor])
+            self.store.delete_retired(descriptor)
+            self.call(database_id,'finish_index_prune',context,operation_id,[identity])
+        record=self.call(database_id,'get_index_publication',context,operation_id)
+        return PruneResult(tuple(record.result['candidates']),tuple(record.result['protected']),
+                           tuple(record.result['deleted']),record.result['deleted_bytes'])
+
+    def recover(self):
+        from vecstor.rpc.common import DeadlineContext
+        require(not any(path.is_symlink() for path in (self.catalog.root/'databases').glob('*.duckdb')),
+                'cannot_recover_symlink_database','FAILED_PRECONDITION')
+        databases=self.catalog.list_databases()
+        records={db['id']:self.catalog.index_call(db['id'],'index_recovery_records',timeout=60) for db in databases}
+        references=[ArtifactDescriptor.from_dict(row['descriptor']) for value in records.values()
+                    for row in value['artifacts'] if row['state']!='DELETED']
+        # Gather every database reference before considering any file an orphan.
+        report=self.store.recover(references)
+        for db in databases:
+            pending=self.catalog.index_call(db['id'],'recover_indexes',report,timeout=60)
+            for operation in pending:self._finish_prune(db['id'],operation,DeadlineContext(time.monotonic()+60))
+        active={row['descriptor']['artifact_id'] for value in records.values() for row in value['artifacts'] if row['state'] in ('READY','CORRUPT')}
+        report['corrupt']=[identity for identity in report['corrupt'] if identity in active]
+        report['databases_checked']=len(databases)
+        return report

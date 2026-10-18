@@ -20,6 +20,9 @@ def restrict_compute_filesystem(storage_dir, gpu=False):
     if not probes:
         raise ValueError("Isolation probe requires an existing NPZ source or managed database")
     probe = probes[0].resolve(strict=True)
+    artifact_probes=sorted([*directory.glob('indexes/objects/*/*/index.faiss'),*directory.glob('indexes/objects/*/*/manifest.json')])
+    if any(path.is_symlink() or not path.resolve().is_relative_to(directory) for path in artifact_probes):
+        raise ValueError('Artifact isolation probes may not escape storage directory')
     if not probe.is_relative_to(directory):
         raise ValueError("Isolation probe may not escape the storage directory")
     project = Path(__file__).resolve().parents[2]
@@ -95,6 +98,12 @@ def restrict_compute_filesystem(storage_dir, gpu=False):
         file_denied = True
     if not directory_denied or not file_denied:
         raise RuntimeError("Isolation failed: compute can still read storage")
+    for artifact in artifact_probes:
+        try:
+            with artifact.open('rb') as source:source.read(1)
+            raise RuntimeError('Isolation failed: compute can read index artifact')
+        except PermissionError:pass
     return {"event": "filesystem_isolation", "mechanism": "landlock", "abi": abi,
             "storage_directory": str(directory), "probe_file": str(probe),
-            "directory_denied": directory_denied, "file_denied": file_denied}
+            "directory_denied": directory_denied, "file_denied": file_denied,
+            "artifact_probe_files":[str(path) for path in artifact_probes],"artifact_files_denied":len(artifact_probes)}

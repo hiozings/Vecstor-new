@@ -1,6 +1,7 @@
 """Shared wire limits and explicit RPC failure semantics."""
 
 import math
+import time
 
 import grpc
 
@@ -29,3 +30,11 @@ def positive_timeout(value):
 def active(context):
     if not context.is_active():
         context.abort(grpc.StatusCode.CANCELLED, "Request cancelled")
+
+
+class DeadlineContext:
+    """Startup management uses the same bounded call contract as RPC handlers."""
+    def __init__(self, deadline):self.deadline=deadline
+    def time_remaining(self):return max(0.,self.deadline-time.monotonic())
+    def is_active(self):return self.time_remaining()>0
+    def add_callback(self, callback):return True

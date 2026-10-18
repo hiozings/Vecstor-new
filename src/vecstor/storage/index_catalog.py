@@ -3,7 +3,7 @@ from dataclasses import asdict, replace
 import json
 import re
 
-from vecstor.index.artifact import ArtifactDescriptor, ArtifactError, PublicationRecord, canonical, digest, require
+from vecstor.index.artifact import ArtifactDescriptor, ArtifactError, PublicationRecord, PruneResult, canonical, digest, require
 from vecstor.index.types import BuildConfig, IndexKey
 
 TERMINAL = {'COMMITTED', 'FAILED', 'ABORTED'}
@@ -25,8 +25,9 @@ def snapshot_key(key):
 
 
 class IndexCatalog:
-    def __init__(self, connection, store, lease_lookup=None):
+    def __init__(self, connection, store, lease_lookup=None, active_artifacts=lambda:()):
         self.connection, self.store, self.lease_lookup = connection, store, lease_lookup
+        self.active_artifacts = active_artifacts
 
     def initialize(self):
         db = self.connection
@@ -196,3 +197,117 @@ class IndexCatalog:
         rows = self.connection.execute('SELECT descriptor_json, state, last_generation FROM __vecstor_index_artifacts WHERE artifact_id>? AND (? IS NULL OR table_id=?) ORDER BY artifact_id LIMIT ?', [cursor, table_id, table_id, limit+1]).fetchall()
         result = [dict(descriptor=json.loads(row[0]), state=row[1], generation=row[2]) for row in rows[:limit]]
         return result, result[-1]['descriptor']['artifact_id'] if len(rows) > limit else ''
+
+    def artifact(self, identity):
+        row=self.connection.execute('SELECT descriptor_json FROM __vecstor_index_artifacts WHERE artifact_id=?',[identity]).fetchone()
+        require(row is not None,'unknown_index_artifact','NOT_FOUND')
+        return ArtifactDescriptor.from_dict(json.loads(row[0]))
+
+    def recovery_records(self):
+        artifacts=[dict(descriptor=ArtifactDescriptor.from_dict(json.loads(row[0])).to_dict(),state=row[1])
+                   for row in self.connection.execute('SELECT descriptor_json,state FROM __vecstor_index_artifacts').fetchall()]
+        operations=[record_dict(record_from_dict(json.loads(row[0])))
+                    for row in self.connection.execute('SELECT record_json FROM __vecstor_index_operations').fetchall()]
+        return dict(artifacts=artifacts,operations=operations)
+
+    def recover(self, store_report):
+        db=self.connection
+        pending=[]
+        db.execute('BEGIN TRANSACTION')
+        try:
+            for identity,state in db.execute('SELECT artifact_id,state FROM __vecstor_index_artifacts').fetchall():
+                if state in ('READY','CORRUPT'):
+                    db.execute('UPDATE __vecstor_index_artifacts SET state=? WHERE artifact_id=?',
+                               ['CORRUPT' if identity in store_report['corrupt'] else 'READY',identity])
+            for row in db.execute('SELECT record_json FROM __vecstor_index_operations').fetchall():
+                record=record_from_dict(json.loads(row[0]))
+                if record.state in TERMINAL:continue
+                if record.operation_kind=='PUBLISH':self.fail(record.operation_id,'ABORTED','storage_restart')
+                elif record.operation_kind=='PRUNE':pending.append(record.operation_id)
+            db.execute('COMMIT')
+        except BaseException:
+            db.execute('ROLLBACK');raise
+        return pending
+
+    @staticmethod
+    def _prune_result(value):
+        return PruneResult(tuple(value['candidates']),tuple(value['protected']),tuple(value['deleted']),value['deleted_bytes'])
+
+    def begin_prune(self, operation_id, keep_last, dry_run, check=lambda:None):
+        require(type(keep_last) is int and keep_last>=1,'invalid_index_retention')
+        require(self.store is not None,'artifact_store_unavailable','FAILED_PRECONDITION')
+        database_id=self.connection.execute('SELECT database_id FROM __vecstor_meta').fetchone()[0]
+        intent=dict(database_id=database_id,keep_last=keep_last,kind='PRUNE',protocol_version=1)
+        if not dry_run:
+            require(isinstance(operation_id,str) and re.fullmatch('[A-Za-z0-9_-]{1,128}',operation_id),'invalid_operation_id')
+            previous=self.get_operation(operation_id)
+            if previous:
+                require(previous.operation_kind=='PRUNE' and previous.request_intent==intent,'operation_id_request_conflict','ALREADY_EXISTS')
+                return self._prune_result(previous.result)
+        db=self.connection
+        with self.store.lock:
+            check()
+            records=db.execute("SELECT artifact_id,table_id,state,last_generation FROM __vecstor_index_artifacts WHERE state IN ('READY','CORRUPT') ORDER BY last_generation DESC,artifact_id").fetchall()
+            protected=set(self.active_artifacts()) | set(self.store.transfer_pins)
+            counts={}
+            for identity,table_id,_,_ in records:
+                counts[table_id]=counts.get(table_id,0)+1
+                if counts[table_id]<=keep_last:protected.add(identity)
+            revision=db.execute('SELECT revision FROM __vecstor_meta').fetchone()[0]
+            tables={row[0] for row in db.execute('SELECT table_id FROM __vecstor_tables').fetchall()}
+            for snapshot,identity in db.execute('SELECT snapshot_json,artifact_id FROM __vecstor_index_heads').fetchall():
+                key=json.loads(snapshot)
+                if key[2]==revision and key[1] in tables:protected.add(identity)
+            for row in db.execute('SELECT record_json FROM __vecstor_index_operations').fetchall():
+                record=record_from_dict(json.loads(row[0]))
+                if record.operation_kind=='PUBLISH' and record.state not in TERMINAL and record.descriptor:
+                    protected.add(record.descriptor.artifact_id)
+            candidates=sorted(row[0] for row in records if row[0] not in protected)
+            result=dict(candidates=candidates,protected=sorted(protected),deleted=[],deleted_bytes=0)
+            if dry_run:return self._prune_result(result)
+            descriptors=[self.artifact(identity) for identity in candidates]
+            db.execute('BEGIN TRANSACTION')
+            try:
+                check()
+                self.store.mark_retired(descriptors)
+                for identity in candidates:
+                    db.execute("UPDATE __vecstor_index_artifacts SET state='RETIRED' WHERE artifact_id=?",[identity])
+                    db.execute('DELETE FROM __vecstor_index_heads WHERE artifact_id=?',[identity])
+                record=PublicationRecord(operation_id,'PRUNE',intent,digest(intent),digest(intent),None,0,
+                    'PRUNING' if candidates else 'COMMITTED',result=result)
+                db.execute('INSERT INTO __vecstor_index_operations VALUES (?, ?, ?)',[operation_id,'',canonical(record_dict(record)).decode()])
+                check()
+                db.execute('COMMIT')
+            except BaseException:
+                db.execute('ROLLBACK')
+                self.store.unmark_retired(descriptors)
+                raise
+            return self._prune_result(result)
+
+    def finish_prune(self, operation_id, deleted_ids, check=lambda:None):
+        record=self.get_operation(operation_id)
+        require(record is not None and record.operation_kind=='PRUNE','unknown_prune_operation','NOT_FOUND')
+        if record.state=='COMMITTED':return self._prune_result(record.result)
+        require(record.state=='PRUNING','prune_not_running','FAILED_PRECONDITION')
+        result=dict(record.result)
+        require(set(deleted_ids).issubset(result['candidates']),'unexpected_prune_artifact','DATA_LOSS')
+        db=self.connection
+        db.execute('BEGIN TRANSACTION')
+        try:
+            check()
+            deleted=set(result['deleted'])
+            for identity in deleted_ids:
+                if identity in deleted:continue
+                row=db.execute('SELECT state,descriptor_json FROM __vecstor_index_artifacts WHERE artifact_id=?',[identity]).fetchone()
+                require(row is not None and row[0] in ('RETIRED','DELETED'),'prune_state_changed','DATA_LOSS')
+                descriptor=json.loads(row[1])
+                result['deleted_bytes']+=descriptor['payload_size']+len(canonical(descriptor))
+                db.execute("UPDATE __vecstor_index_artifacts SET state='DELETED' WHERE artifact_id=?",[identity])
+                deleted.add(identity)
+            result['deleted']=sorted(deleted)
+            state='COMMITTED' if deleted==set(result['candidates']) else 'PRUNING'
+            self._save(replace(record,state=state,result=result))
+            check();db.execute('COMMIT')
+        except BaseException:
+            db.execute('ROLLBACK');raise
+        return self._prune_result(result)

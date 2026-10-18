@@ -223,15 +223,15 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 - `preload_indexes(manager, targets: list[dict], deadline: float) -> list[ArtifactInspection]`：串行加载，每目标≤60秒，总≤300秒，最后复查head；任何失败不发ready。
 - SessionClient 新增 `publish_index`、`load_index`、`inspect_published_index`、`list_published_indexes`、`index_publication_status`、`prune_index_artifacts`，参数对应T4/T5请求；publish/prune保存并显示operation_id。
 
-- [ ] 写失败测试：`test_storage_restart_recovers_committed_only`、`test_recovery_marks_missing_blob_corrupt`、`test_old_token_invalid_after_restart`、`test_preload_has_no_training_or_snapshot_export`、`test_preload_failure_prevents_ready`。
-- [ ] 写GC失败测试：旧租约/下载pin保护、同revision多配置保留、quota不足不删保护对象、RETIRED后kill重启继续清理、墓碑阻止不同字节复活、prune重放保持原集合。
-- [ ] 运行上述三个测试文件确认失败。
-- [ ] 实现启动核对与崩溃清理，按设计锁序实现mark/delete/finalize GC；不在全局锁内等待数据库/网络，不把存储旧索引当数据时光回溯。
-- [ ] 实现`--index-source`、`--index-preload`及工件预算参数；启动preload在服务ready前完成。读取配置的允许目录与现有quality配置规则一致。
-- [ ] 实现设计8的终端命令及帮助；调整`.index`参数解析，显式拒绝重复/未知键，保持旧build/list/clear。prune默认dry-run，execute必须operation_id。
-- [ ] 扩展隔离探针：A/B进程及GPU worker拒绝读取存储payload与manifest，同时网络加载成功；不得扩大存储目录权限。
-- [ ] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_preload.py tests/integration/test_p4_index_recovery.py tests/integration/test_p4_index_gc.py tests/unit/test_shell_ui.py tests/integration/test_shell_workflow.py`；增加真实PTY新命令流程。
-- [ ] 授权时提交 `feat: recover and prune published index versions explicitly`。
+- [x] 写失败测试：`test_storage_restart_recovers_committed_only`、`test_recovery_marks_missing_blob_corrupt`、`test_old_token_invalid_after_restart`、`test_preload_has_no_training_or_snapshot_export`、`test_preload_failure_prevents_ready`。
+- [x] 写GC失败测试：旧租约/下载pin保护、同revision多配置保留、quota不足不删保护对象、RETIRED后kill重启继续清理、墓碑阻止不同字节复活、prune重放保持原集合。
+- [x] 运行上述三个测试文件确认失败。
+- [x] 实现启动核对与崩溃清理，按设计锁序实现mark/delete/finalize GC；不在全局锁内等待数据库/网络，不把存储旧索引当数据时光回溯。
+- [x] 实现`--index-source`、`--index-preload`及工件预算参数；启动preload在服务ready前完成。读取配置的允许目录与现有quality配置规则一致。
+- [x] 实现设计8的终端命令及帮助；调整`.index`参数解析，显式拒绝重复/未知键，保持旧build/list/clear。prune默认dry-run，execute必须operation_id。
+- [x] 扩展隔离探针：A/B进程及GPU worker拒绝读取存储payload与manifest，同时网络加载成功；不得扩大存储目录权限。
+- [x] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_preload.py tests/integration/test_p4_index_recovery.py tests/integration/test_p4_index_gc.py tests/unit/test_shell_ui.py tests/integration/test_shell_workflow.py`；增加真实PTY新命令流程。
+- [x] 授权时提交 `feat: recover and prune published index versions explicitly`。
 
 ## Task 9：双节点、崩溃、规模验收与交付文档
 
@@ -299,3 +299,5 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 - T6双节点published执行绑定完成；30项回归通过（18.64秒），含旧读跨版本、同revision换配置、缺副本/损坏拒绝、客户端错误工件/版本完成帧拒绝。T7—T9继续。
 
 - T7 GPU工件来源与v3质量配置完成；47项后端/质量/旧GPU测试通过（35.96秒），6项验证工具/工件质量边界测试通过（1.55秒）。完整500留出正式证据按计划留至T9，不将负面工具测试当作正式质量通过。
+
+- T8存储恢复、受保护GC、显式预加载、CLI/PTY及工件隔离探针完成。阶段完整真实GPU回归664通过（246.38秒），随后修复GPU预算错误码与预加载名称归一化；39项定向通过（24.80秒），实际进程崩溃窗口/GC恢复及不同字节墓碑保护6项通过（5.76秒）。T9继续正式规模、成本、质量与整体审查。

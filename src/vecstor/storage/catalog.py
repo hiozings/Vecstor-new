@@ -89,7 +89,8 @@ class DatabaseCatalog:
     def index_call(self, database_id, method, *args, timeout=15, cancelled=None):
         allowed = {'begin_index_publication','bind_index_upload','index_phase','commit_index_publication',
                    'get_index_publication','fail_index_publication','list_published_indexes','leased_index',
-                   'record_snapshot_digest','snapshot_receipt','check_index_publication','claim_index_finalize','index_lease_remaining'}
+                   'record_snapshot_digest','snapshot_receipt','check_index_publication','claim_index_finalize','index_lease_remaining',
+                   'index_recovery_records','recover_indexes','index_artifact','begin_index_prune','finish_index_prune'}
         if method not in allowed: raise ValueError('Unknown index catalog operation')
         return self.database(database_id).call(method, *args, timeout=timeout, cancelled=cancelled)
 

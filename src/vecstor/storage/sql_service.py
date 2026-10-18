@@ -46,10 +46,10 @@ def _bounded(message, context):
 
 
 class SQLStorageService(rpc.SQLStorageServicer):
-    def __init__(self, root, candidate_binding="text",candidate_plan_cache=True):
+    def __init__(self, root, candidate_binding="text",candidate_plan_cache=True,artifact_options=None):
         from vecstor.storage.index_artifacts import ArtifactStore
         from vecstor.storage.index_service import IndexPublicationService
-        store = ArtifactStore(Path(root)/'indexes')
+        store = ArtifactStore(Path(root)/'indexes',**(artifact_options or {}))
         self.catalog = DatabaseCatalog(root,candidate_binding,candidate_plan_cache,artifact_store=store)
         # Shared occupancy cap prevents either stream type from starving the
         # FetchVectors, BeginRead and EndRead unary handlers.
@@ -57,6 +57,9 @@ class SQLStorageService(rpc.SQLStorageServicer):
         self.index_service = IndexPublicationService(self.catalog, store, self._stream_slots)
         self._lease_lock = Lock()
         self._leases = {}
+        try:self.recovery_report=self.index_service.recover()
+        except BaseException:
+            self.catalog.close();store.close();raise
 
     def close(self):
         self.catalog.close()
@@ -256,8 +259,8 @@ class SQLStorageService(rpc.SQLStorageServicer):
     def PruneIndexArtifacts(self, request, context): return self.index_service.PruneIndexArtifacts(request, context)
 
 
-def create_catalog_server(root, address, candidate_binding="text",candidate_plan_cache=True):
-    backend = SQLStorageService(root,candidate_binding,candidate_plan_cache)
+def create_catalog_server(root, address, candidate_binding="text",candidate_plan_cache=True,artifact_options=None):
+    backend = SQLStorageService(root,candidate_binding,candidate_plan_cache,artifact_options)
     server = grpc.server(ThreadPoolExecutor(max_workers=8), options=OPTIONS)
     rpc.add_SQLStorageServicer_to_server(backend, server)
     try:

@@ -205,8 +205,8 @@ message IndexArtifactFrame {
 message PruneIndexArtifactsRequest {
   string database_id = 1;
   string operation_id = 2;
-  uint32 keep_last = 3;
-  bool dry_run = 4;
+  optional uint32 keep_last = 3;
+  optional bool dry_run = 4;
 }
 message PruneIndexArtifactsResponse {
   repeated string candidates = 1;
@@ -214,6 +214,7 @@ message PruneIndexArtifactsResponse {
   repeated string deleted = 3;
   uint64 deleted_bytes = 4;
   string state = 5;
+  string byte_accounting = 6;
 }
 message PublishIndexRequest {
   string database_id = 1;

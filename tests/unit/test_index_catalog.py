@@ -131,3 +131,29 @@ def test_unknown_catalog_schema_rejected():
         connection.execute('INSERT INTO __vecstor_index_meta VALUES (999, 0)')
         with pytest.raises(ArtifactError, match='schema'):
             IndexCatalog(connection, PreparedStore()).initialize()
+
+
+def test_deleted_key_tombstone_rejects_different_native_bytes(catalog):
+    lease, first, record = prepare(catalog)
+    commit(catalog,'publish1',lease,first)
+    cat,db,data,store=catalog
+    db.call('end_read',lease['token'])
+    def retire():
+        db.connection.execute("UPDATE __vecstor_index_artifacts SET state='DELETED'")
+        db.connection.execute('DELETE FROM __vecstor_index_heads')
+    db.pool.submit(retire).result()
+    lease=db.call('begin_read','items',60,True)
+    config=first.build_config
+    handle=FaissIndex.build(data.ids,data.vectors,config)
+    handle._index.quantizer.reset()
+    handle._index.quantizer.add(np.zeros((1,data.dimension),dtype=np.float32))
+    changed,_=encode_artifact(handle,first.key,config,first.snapshot_sha256)
+    assert changed.artifact_id!=first.artifact_id
+    db.call('begin_index_publication',lease['token'],'changed',config,0,record.request_intent)
+    db.call('record_snapshot_digest',lease['token'],first.snapshot_sha256,data.size)
+    db.call('bind_index_upload','changed',changed)
+    db.call('index_phase','changed','STAGED');db.call('index_phase','changed','VALIDATING')
+    store.objects[changed.artifact_id]=changed
+    with pytest.raises(ArtifactError,match='index_key_content_conflict'):
+        commit(catalog,'changed',lease,changed)
+    assert db.call('begin_read','items',60,True)['published_index_state']=='missing'

@@ -134,6 +134,76 @@ class SessionClient:
         request = pb.IndexRequest(database_id=self.database_id, table=safe_name(table) if table else '')
         return self._typed_control(self.stub.ListIndexes, request)
 
+    def _index_rpc(self,name,request,timeout=45):
+        timeout=positive_timeout(timeout)
+        if timeout>60:raise ValueError('Index management timeout must be at most 60 seconds')
+        if self.get_search_capabilities().get('index_publication_version')!=1:
+            raise ValueError('Compute service does not support index publication')
+        call=getattr(self.stub,name).future(request,timeout=timeout)
+        try:return call.result()
+        except grpc.RpcError as error:raise RemoteError(error.code(),error.details()) from error
+        finally:call.cancel()
+
+    def publish_index(self,table,nlist=None,timeout=45,seed=20261013,operation_id=None,expected_generation=None):
+        from vecstor.index.types import BuildConfig
+        from vecstor.rpc.index_codec import record_from_proto
+        from dataclasses import asdict
+        BuildConfig(nlist=nlist,seed=seed).validate()
+        operation_id=operation_id or str(uuid.uuid4())
+        self.last_operation_id=operation_id
+        request=pb.PublishIndexRequest(database_id=self.database_id,table=safe_name(table),seed=seed,operation_id=operation_id)
+        if nlist is not None:request.nlist=nlist
+        if expected_generation is not None:
+            if type(expected_generation) is not int or not 0<=expected_generation<2**63:raise ValueError('Invalid expected generation')
+            request.expected_generation=expected_generation
+        try:response=self._index_rpc('PublishIndex',request,timeout)
+        except RemoteError as error:
+            raise RemoteError(error.code,error.details+f'; operation_id={operation_id}; use .index publication-status {operation_id}') from error
+        record=record_from_proto(response.publication)
+        if record is None or record.operation_id!=operation_id or record.state!='COMMITTED':raise ValueError('Publication was not committed')
+        return dict(asdict(record),statistics=json.loads(response.statistics_json))
+
+    def load_index(self,table,device='cpu',timeout=45,expected_artifact_id=None,gpu_id=0):
+        from vecstor.rpc.index_codec import descriptor_from_proto
+        if device not in ('cpu','gpu') or type(gpu_id) is not int or gpu_id!=0:raise ValueError('Invalid index device')
+        response=self._index_rpc('LoadIndex',pb.LoadIndexRequest(database_id=self.database_id,table=safe_name(table),
+            device=device,gpu_id=gpu_id,expected_artifact_id=expected_artifact_id or ''),timeout)
+        descriptor=descriptor_from_proto(response.descriptor)
+        if response.device!=device or (expected_artifact_id and descriptor.artifact_id!=expected_artifact_id):raise ValueError('Index load confirmation mismatch')
+        return dict(state='ready',device=device,descriptor=descriptor.to_dict(),generation=response.publication_generation,
+                    reused=response.reused,statistics=json.loads(response.statistics_json))
+
+    def inspect_published_index(self,table):
+        from vecstor.rpc.index_codec import descriptor_from_proto
+        response=self._index_rpc('InspectPublishedIndex',pb.InspectPublishedIndexRequest(database_id=self.database_id,table=safe_name(table)))
+        return dict(descriptor=descriptor_from_proto(response.descriptor).to_dict() if response.HasField('descriptor') else None,
+            generation=response.generation,cpu_ready=response.cpu_ready,gpu_ready=response.gpu_ready,state=response.state,index_source=response.index_source)
+
+    def list_published_indexes(self,table='',page_size=128,cursor=''):
+        from vecstor.rpc.index_codec import descriptor_from_proto
+        if type(page_size) is not int or not 1<=page_size<=128:raise ValueError('Page size must be 1..128')
+        response=self._index_rpc('ListPublishedIndexes',pb.ListPublishedIndexesRequest(database_id=self.database_id,
+            table=safe_name(table) if table else '',page_size=page_size,cursor=cursor))
+        return dict(indexes=[dict(descriptor=descriptor_from_proto(r.descriptor).to_dict(),state=r.state,
+                                 generation=r.generation,matches_current=r.matches_current) for r in response.indexes],next_cursor=response.next_cursor)
+
+    def index_publication_status(self,operation_id):
+        from dataclasses import asdict
+        from vecstor.rpc.index_codec import record_from_proto
+        response=self._index_rpc('GetIndexPublication',pb.IndexPublicationRequest(database_id=self.database_id,operation_id=operation_id))
+        record=record_from_proto(response)
+        return asdict(record) if record is not None else dict(operation_id=operation_id,state='UNKNOWN')
+
+    def prune_index_artifacts(self,keep_last=2,dry_run=True,operation_id=None,timeout=45):
+        if type(keep_last) is not int or not 1<=keep_last<2**32:raise ValueError('keep_last must be a positive uint32')
+        if type(dry_run) is not bool:raise ValueError('dry_run must be boolean')
+        if not dry_run and not operation_id:raise ValueError('Prune execution requires an operation_id')
+        if operation_id:self.last_operation_id=operation_id
+        response=self._index_rpc('PruneIndexArtifacts',pb.PruneIndexArtifactsRequest(database_id=self.database_id,
+            operation_id=operation_id or '',keep_last=keep_last,dry_run=dry_run),timeout)
+        return dict(candidates=list(response.candidates),protected=list(response.protected),deleted=list(response.deleted),
+            deleted_bytes=response.deleted_bytes,state=response.state,byte_accounting=response.byte_accounting)
+
     def clear_indexes(self, table='', device=''):
         if device not in ('','cpu','gpu'):raise ValueError('Invalid index device')
         if device and self.get_search_capabilities().get('index_devices_version',0)<1:

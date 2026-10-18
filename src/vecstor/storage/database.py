@@ -45,6 +45,8 @@ class Database:
         try:
             self.id = self.pool.submit(self._initialize).result()
         except Exception:
+            if hasattr(self,'connection'):
+                self.pool.submit(self.connection.close).result()
             self.pool.shutdown(wait=True)
             raise
 
@@ -59,7 +61,7 @@ class Database:
             db.execute("INSERT INTO __vecstor_meta VALUES (?, 0)", [str(uuid.uuid4())])
             row = db.execute("SELECT database_id FROM __vecstor_meta").fetchone()
         from vecstor.storage.index_catalog import IndexCatalog
-        self.index_catalog = IndexCatalog(db, self.artifact_store, self._publication_lease)
+        self.index_catalog = IndexCatalog(db, self.artifact_store, self._publication_lease, self._index_protected_artifacts)
         self.index_catalog.initialize()
         return row[0]
 
@@ -413,6 +415,19 @@ class Database:
         revision = self._revision()
         for record in records: record['matches_current'] = record['descriptor']['key']['revision'] == revision
         return records, cursor
+
+    def _index_protected_artifacts(self):
+        now=time.monotonic()
+        return [item['published_index']['artifact_id'] for _,expires,item in self.leases.values()
+                if expires>now and item.get('published_index')]
+
+    def _index_recovery_records(self):return self.index_catalog.recovery_records()
+    def _recover_indexes(self, report):return self.index_catalog.recover(report)
+    def _index_artifact(self, identity):return self.index_catalog.artifact(identity)
+    def _begin_index_prune(self, operation_id, keep_last, dry_run):
+        return self.index_catalog.begin_prune(operation_id,keep_last,dry_run,self._check_time)
+    def _finish_index_prune(self, operation_id, identities):
+        return self.index_catalog.finish_prune(operation_id,identities,self._check_time)
 
     def close(self):
         def shutdown():

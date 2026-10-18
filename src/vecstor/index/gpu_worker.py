@@ -195,7 +195,7 @@ def main():
     scratch,margin=int(sys.argv[3]),int(sys.argv[4]);probe=json.loads(sys.argv[5])
     isolation=None
     if probe:
-        directory,file=probe
+        directory,file,*artifact_files=probe
         try:os.listdir(directory);raise RuntimeError('GPU worker can list storage')
         except PermissionError:pass
         try:
@@ -203,6 +203,12 @@ def main():
             raise RuntimeError('GPU worker can read storage')
         except PermissionError:pass
         isolation={'directory_denied':True,'file_denied':True}
+        for artifact in artifact_files:
+            try:
+                with open(artifact,'rb') as source:source.read(1)
+                raise RuntimeError('GPU worker can read index artifact')
+            except PermissionError:pass
+        if artifact_files:isolation['artifact_files_denied']=len(artifact_files)
     resource=None;indices={}
     def execute_native(request):
         nonlocal resource

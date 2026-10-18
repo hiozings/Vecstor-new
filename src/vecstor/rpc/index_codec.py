@@ -32,7 +32,7 @@ def record_to_proto(record, operation_id=''):
 
 
 def record_from_proto(value):
-    require(value.state in ('UNKNOWN','RESERVED','UPLOADING','STAGED','VALIDATING','COMMITTED','FAILED','ABORTED'), 'invalid_publication_state', 'DATA_LOSS')
+    require(value.state in ('UNKNOWN','RESERVED','UPLOADING','STAGED','VALIDATING','PRUNING','COMMITTED','FAILED','ABORTED'), 'invalid_publication_state', 'DATA_LOSS')
     if value.state == 'UNKNOWN': return None
     return PublicationRecord(value.operation_id, value.operation_kind, json.loads(value.intent_json), value.intent_digest,
         value.request_digest, IndexKey(**{n:getattr(value.key,n) for n in IndexKey.__dataclass_fields__}) if value.HasField('key') else None,
