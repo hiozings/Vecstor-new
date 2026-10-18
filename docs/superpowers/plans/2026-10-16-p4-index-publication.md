@@ -8,7 +8,7 @@
 
 **Tech Stack:** 现有 Conda Python 3.12.15、DuckDB 1.5.6、Faiss 1.12.0、NumPy 1.26.4、gRPC 1.83.1、Protobuf 7.35.1、pytest；不新增依赖。
 
-**Spec:** [P4 设计提案](../../design/p4-index-publication.md)。状态：2026-10-16 已形成提案，尚未经实施验收；任务均未开始。用户要求本轮不修改业务代码，不将本计划视为实施或 Git 操作授权。
+**Spec:** [P4 设计提案](../../design/p4-index-publication.md)。状态：2026-10-16 已形成提案，初始文档尚未实施；当前T1—T6已完成，T7—T9继续，完整验收尚未完成。用户要求本轮不修改业务代码，不将本计划视为实施或 Git 操作授权。
 
 ## 全局约束
 
@@ -170,8 +170,8 @@ def test_digest_is_independent_of_batch_partition(snapshot):
 
 **Interfaces:** `execute_vector(..., index_source='local')`；LeaseIO 在 published 模式验证 publication_version 和 descriptor；查询trace新增字段遵循设计8。服务配置在构造时固定，普通SQL不携带索引管理选项。
 
-- [ ] 编写双计算服务共享一个storage fixture，固定两节点独立registry；用Event阻塞旧查询已pin之后的FetchVectors。
-- [ ] 写 `test_two_nodes_same_artifact_same_answers`、`test_write_gap_never_serves_stale_ann`、`test_same_revision_head_switch_ignores_local_active`、`test_old_query_completes_after_new_head`、`test_inspect_is_read_only`、`test_corrupt_publication_errors_but_exact_works`。
+- [x] 编写双计算服务共享一个storage fixture，固定两节点独立registry；用Event阻塞旧查询已pin之后的FetchVectors。
+- [x] 写 `test_two_nodes_same_artifact_same_answers`、`test_write_gap_never_serves_stale_ann`、`test_same_revision_head_switch_ignores_local_active`、`test_old_query_completes_after_new_head`、`test_inspect_is_read_only`、`test_corrupt_publication_errors_but_exact_works`。
 
 ```python
 def test_same_revision_head_switch_ignores_local_active(cluster):
@@ -187,11 +187,11 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
     assert result['execution_plan']['artifact_id'] == second.descriptor.artifact_id
 ```
 
-- [ ] 运行 `conda run -n vecstor python -m pytest -q tests/integration/test_p4_index_consistency.py` 记录失败。
-- [ ] 接入published按租约descriptor精确选择，区分未发布/未加载/损坏；保持默认exact与已有显式设备回退规则。无匹配CPU/GPU时不得挑本地同snapshot其他key。
-- [ ] EXPLAIN仅元信息、ANALYZE仅一次；client完成帧对publication能力与实际artifact字段做一致性检查，普通CRUD不受影响。
-- [ ] 运行新测试及 `tests/integration/test_p3_execution.py tests/unit/test_gpu_review_regressions.py`；检查A/B屏障、旧读答案和新读版本。
-- [ ] 授权时提交 `feat: enforce lease-bound published indexes across compute nodes`。
+- [x] 运行 `conda run -n vecstor python -m pytest -q tests/integration/test_p4_index_consistency.py` 记录失败。
+- [x] 接入published按租约descriptor精确选择，区分未发布/未加载/损坏；保持默认exact与已有显式设备回退规则。无匹配CPU/GPU时不得挑本地同snapshot其他key。
+- [x] EXPLAIN仅元信息、ANALYZE仅一次；client完成帧对publication能力与实际artifact字段做一致性检查，普通CRUD不受影响。
+- [x] 运行新测试及 `tests/integration/test_p3_execution.py tests/unit/test_gpu_review_regressions.py`；检查A/B屏障、旧读答案和新读版本。
+- [x] 授权时提交 `feat: enforce lease-bound published indexes across compute nodes`。
 
 ## Task 7：GPU 工件来源与质量配置 v3
 
@@ -279,7 +279,7 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 | 9 验收/成本/证据 | T9，并由各任务前置回归覆盖 |
 | 10 兼容/限制 | 全局约束、T1、T7、T9文档 |
 
-本轮完成设计与计划编写、文档链接/一致性自查及项目文档索引更新；未修改业务代码、proto、测试或依赖，未运行新的业务回归，未执行Git操作。上述命令与测试名均为实施目标，不是已有测试通过记录。
+2026-10-16规划轮次完成设计与计划编写、文档链接/一致性自查及项目文档索引更新；未修改业务代码、proto、测试或依赖，未运行新的业务回归，未执行Git操作。上述命令与测试名均为实施目标，不是已有测试通过记录。
 
 ## 实施记录（2026-10-17）
 
@@ -295,3 +295,5 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 ## 继续实施（2026-10-18）
 
 - 补注册后清除PYTHONPATH的真实GPU完整回归632通过（180.97秒）。T5计算发布/加载与精确工件引用完成，含取消回收，41项定向回归通过；T6—T9继续。CPU加载在确认存储验证和字节摘要后使用现有父进程原生解码方式，设计7.2已说明该取舍与故障范围。
+
+- T6双节点published执行绑定完成；30项回归通过（18.64秒），含旧读跨版本、同revision换配置、缺副本/损坏拒绝、客户端错误工件/版本完成帧拒绝。T7—T9继续。

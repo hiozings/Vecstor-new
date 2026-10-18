@@ -12,6 +12,7 @@ from vecstor.query.execution_settings import resolve_execution_options
 from vecstor.query.quality_policy import QualityCatalog
 from vecstor.compute.index_manager import IndexManager
 from vecstor.index.gpu_worker import GpuDataError
+from vecstor.index.artifact import ArtifactError
 from vecstor.compute.vector_execution import execute_vector
 from vecstor.rpc import sql_pb2 as pb, sql_pb2_grpc as rpc
 from vecstor.rpc.common import OPTIONS, RemoteError, active
@@ -19,11 +20,19 @@ from vecstor.rpc.sql_codec import encode_result
 
 
 class SQLComputeService(rpc.SQLComputeServicer):
-    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None,fused_candidates=False):
+    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None,fused_candidates=False,index_source='local'):
+        if index_source not in ('local','published'): raise ValueError('Invalid index source')
+        self.index_source = index_source
         self.server_instance_id=uuid.uuid4().hex
         self.quality_catalog=QualityCatalog.from_document(quality_document)
         self.channel = grpc.insecure_channel(address, options=OPTIONS)
         self.stub = rpc.SQLStorageStub(self.channel)
+        if index_source == 'published':
+            try:
+                caps = json.loads(self.stub.Control(pb.ControlRequest(action='capabilities'),timeout=min(timeout,5)).json_result)
+                if caps.get('index_publication_version') != 1: raise ValueError('Storage does not support published indexes')
+            except Exception:
+                self.channel.close(); raise
         self.timeout = timeout
         self.fused_candidates=fused_candidates
         if fused_candidates:
@@ -81,7 +90,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 normalized=pb.SQLRequest.FromString(request.SerializeToString())
                 normalized.sql=plan.sql
                 output=execute_vector(self.stub,self.index_manager.registry,normalized,plan.vector,options,
-                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry,fused_candidates=use_fused)
+                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry,fused_candidates=use_fused,index_source=self.index_source)
                 output['execution_plan']['server_instance_id']=self.server_instance_id
                 output['execution_plan']['server_admission_ms']=getattr(context,'vecstor_admission_ms',None)
                 if plan.explain:output['rows']=[[json.dumps(output['execution_plan'],ensure_ascii=False,allow_nan=False)]]
@@ -100,6 +109,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
         except RemoteError as error:
             context.abort(error.code, error.details)
         except GpuDataError as error:context.abort(grpc.StatusCode.DATA_LOSS,str(error))
+        except ArtifactError as error:context.abort(getattr(grpc.StatusCode,error.code),str(error))
         except TimeoutError as error:context.abort(grpc.StatusCode.DEADLINE_EXCEEDED,str(error))
         except InterruptedError as error:context.abort(grpc.StatusCode.CANCELLED,str(error))
         except ValueError as error:
@@ -159,6 +169,8 @@ class SQLComputeService(rpc.SQLComputeServicer):
     def PruneIndexArtifacts(self, request, context): return self._index_proxy('PruneIndexArtifacts', request, context)
 
     def BuildIndex(self,request,context):
+        if self.index_source == 'published':
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Use .index publish and .index load in published mode')
         try:
             safe_name(request.table)
             output=self.index_manager.build(request,context)

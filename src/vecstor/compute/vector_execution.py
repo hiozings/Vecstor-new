@@ -10,6 +10,8 @@ import grpc
 import numpy as np
 
 from vecstor.compute.lease_io import LeaseIO, consistent
+from vecstor.compute.index_publication import IndexPublicationManager
+from vecstor.index.artifact import ArtifactError
 from vecstor.data import query_vector
 from vecstor.query.quality_policy import QualityUnavailable
 from vecstor.rpc.common import RemoteError
@@ -32,7 +34,7 @@ class TopK:
         self.trace['rerank_ms']+=(time.monotonic()-started)*1000
 
 
-def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None,fused_candidates=False):
+def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None,fused_candidates=False,index_source='local'):
     started=time.monotonic()
     trace={'plan_version':1,'requested_mode':options.mode,'requested_path':options.path,
            'requested_device':options.device,'actual_device':'cpu','device_fallback_reason':None,'device_attempts':[],
@@ -46,10 +48,24 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
            'metadata_rows_scanned':None,'byte_accounting':'storage_protobuf_payloads'}
     io=LeaseIO(stub,request.database_id,plan.table,context,deadline,trace)
     trace['counts']['selector_builds']=0
+    trace.update(index_source=index_source,index_publication_version=1 if index_source=='published' else 0,
+                 published_artifact_id=None,artifact_id=None,payload_sha256=None,publication_generation=0,
+                 published_index_state=None,index_load_state=None)
     try:
         lease=io.open();query=query_vector(plan.query_vector,lease.dimension).astype(np.float64)
+        descriptor = None
+        if index_source == 'published':
+            descriptor = IndexPublicationManager._lease_descriptor(lease, required=False)
+            trace.update(published_artifact_id=descriptor.artifact_id if descriptor else None,
+                         publication_generation=lease.publication_generation,published_index_state=lease.published_index_state)
+            if options.mode=='approx' and lease.published_index_state=='corrupt' and explain!='plan':
+                raise ArtifactError('DATA_LOSS','published_artifact_corrupt')
         with ExitStack() as pins:
-            cpu_entry=pins.enter_context(registry.acquire(lease))
+            def acquire(reg):
+                if index_source=='published':
+                    return pins.enter_context(reg.acquire_exact(descriptor.key,descriptor.artifact_id)) if descriptor else None
+                return pins.enter_context(reg.acquire(lease))
+            cpu_entry=acquire(registry)
             entry=cpu_entry;device='cpu';device_problem=None
             def device_failure(why):
                 io.remaining()
@@ -57,7 +73,7 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                 trace['device_fallback_reason']=why
                 trace['actual_device']='cpu'
             if options.device=='gpu':
-                gpu_entry=pins.enter_context(gpu_registry.acquire(lease)) if gpu_registry else None
+                gpu_entry=acquire(gpu_registry) if gpu_registry else None
                 device_problem='gpu_path_unsupported' if options.path!='search-first' else 'gpu_replica_missing' if gpu_entry is None else None
                 if not device_problem:entry=gpu_entry;device='gpu'
                 elif explain!='plan':device_failure(device_problem)
@@ -67,13 +83,16 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
 
             if entry: trace['index']=entry.describe()
             reason='index_version_mismatch' if registry.has_stale(lease) else 'index_missing'
+            if index_source=='published': reason='published_index_not_loaded' if descriptor else 'index_not_published'
             trace['index_state']='ready' if entry else reason
+            trace['index_load_state']='ready' if entry else reason
             quality_problem=None
             if options.quality_profile_id is not None:
                 trace['quality_profile']={'requested_id':options.quality_profile_id,'state':'index_unavailable'}
                 if entry:
                     try:
                         if quality_catalog is None:raise QualityUnavailable('quality_profile_missing')
+                        if index_source=='published':raise QualityUnavailable('quality_profile_artifact_unbound')
                         options,description=quality_catalog.resolve(options.quality_profile_id,entry.key,entry.handle.nlist,
                                                                     entry.handle.row_count,plan,replace(options,device=device),execution=entry.statistics)
                         trace['quality_profile']=description
@@ -112,7 +131,7 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                 def fallback(why,known=None):
                     io.remaining()
                     if options.fallback=='error':
-                        code=grpc.StatusCode.FAILED_PRECONDITION if why in {'index_missing','index_version_mismatch','unsafe_float32_range'} or why.startswith('quality_profile_') else grpc.StatusCode.RESOURCE_EXHAUSTED
+                        code=grpc.StatusCode.FAILED_PRECONDITION if why in {'index_missing','index_version_mismatch','unsafe_float32_range','published_index_not_loaded','index_not_published'} or why.startswith('quality_profile_') else grpc.StatusCode.RESOURCE_EXHAUSTED
                         raise RemoteError(code,why)
                     exact(why,known)
 
@@ -202,6 +221,8 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                             for row,distance in zip(top.rows,top.distances)],'revision':lease.revision,'affected_rows':None,
                     'execution_path':f"grpc_{trace['actual_mode']}_{trace['actual_path'].replace('-','_')}"}
     finally:io.close()
+    if index_source=='published' and trace['actual_mode']=='approx':
+        trace.update(artifact_id=descriptor.artifact_id,payload_sha256=descriptor.payload_sha256)
     trace['compute_elapsed_ms']=(time.monotonic()-started)*1000
     if explain is not None:
         return {'columns':[{'name':'plan','type':'VARCHAR'}],'rows':[[json.dumps(trace,ensure_ascii=False,allow_nan=False)]],

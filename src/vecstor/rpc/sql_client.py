@@ -205,6 +205,12 @@ class SessionClient:
                             if quality.get('requested_id')!=profile_id or (execution.get('actual_mode')=='approx' and quality.get('state')!='applied'):
                                 raise ValueError('Compute service did not acknowledge/apply the quality profile')
                         execution=event.get('execution_plan')
+                        if plan.kind == 'vector':
+                            from vecstor.rpc.index_codec import validate_publication_plan
+                            if self._query_caps and self._query_caps.get('index_source') == 'published':
+                                if not execution or execution.get('index_source') != 'published':
+                                    raise ValueError('Compute service did not acknowledge published index source')
+                            if execution is not None: validate_publication_plan(execution, event['revision'])
                         if execution is not None:
                             if self._query_caps and execution.get('server_instance_id')!=self._query_caps.get('server_instance_id'):
                                 self._invalidate_query_capabilities()

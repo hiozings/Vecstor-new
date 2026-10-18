@@ -79,3 +79,23 @@ def read_artifact_frames(frames, database_id, token, expected, check=lambda:None
     require(complete and hashlib.sha256(output).hexdigest() == expected.payload_sha256, 'incomplete_artifact_or_checksum', 'DATA_LOSS')
     check()
     return descriptor, bytes(output)
+
+
+def validate_publication_plan(plan, revision):
+    if plan.get('index_source') != 'published': return
+    require(plan.get('index_publication_version') == 1 and type(plan.get('publication_generation')) is int
+            and plan['publication_generation'] >= 0 and type(plan.get('revision')) is int
+            and plan['revision'] == revision, 'published_snapshot_confirmation', 'DATA_LOSS')
+    if plan.get('actual_mode') != 'approx':
+        require(plan.get('artifact_id') is None and plan.get('payload_sha256') is None,
+                'unexpected_actual_artifact', 'DATA_LOSS')
+        return
+    index = plan.get('index') or {}
+    for name in ('artifact_id', 'payload_sha256'):
+        value = plan.get(name)
+        require(isinstance(value,str) and len(value)==64 and all(c in '0123456789abcdef' for c in value)
+                and value == index.get(name), 'published_artifact_confirmation', 'DATA_LOSS')
+    require(plan['artifact_id'] == plan.get('published_artifact_id'), 'published_artifact_mismatch', 'DATA_LOSS')
+    require(all(index.get(name) == plan.get(name) and index.get(name) is not None
+                for name in ('database_id','table_id','schema_version','revision','dimension','metric')),
+            'published_snapshot_mismatch', 'DATA_LOSS')
