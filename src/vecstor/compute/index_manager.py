@@ -44,12 +44,14 @@ class IndexManager:
         hasher = SnapshotHasher(n, lease.dimension)
         offset = 0
         receipt = ''
+        export_started=time.monotonic()
         for labels, values in io.snapshot():
             ids[offset:offset+len(labels)] = labels
             vectors[offset:offset+len(labels)] = values
             hasher.add(labels, values)
             offset += len(labels)
         consistent(offset == n, 'Incomplete build input')
+        export_ms=(time.monotonic()-export_started)*1000
         receipt = hasher.finish()
         if lease.index_publication_version:
             consistent(getattr(io, 'snapshot_sha256', None) == receipt, 'Snapshot digest mismatch')
@@ -61,7 +63,7 @@ class IndexManager:
         consistent(handle.row_count == n and handle.dimension == lease.dimension and handle.nlist == config.nlist, 'Built index metadata mismatch')
         statistics.update(estimated_build_bytes=estimate, build_total_ms=(time.monotonic()-start)*1000,
                           export_rpc_calls=io.trace['counts']['rpc_calls'], export_payload_bytes=io.trace['counts']['rpc_payload_bytes'],
-                          snapshot_sha256=receipt)
+                          snapshot_sha256=receipt,export_ms=export_ms)
         return handle, statistics
 
     def build(self,request,context):

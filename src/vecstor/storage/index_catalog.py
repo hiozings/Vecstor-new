@@ -88,7 +88,7 @@ class IndexCatalog:
         if existing:
             require(existing[1] not in ('CORRUPT', 'RETIRED'), 'index_artifact_unavailable', 'FAILED_PRECONDITION')
             if existing[1] == 'READY':
-                record = self._save(replace(record, descriptor=ArtifactDescriptor.from_dict(json.loads(existing[0]))))
+                record = self._save(replace(record, descriptor=ArtifactDescriptor.from_dict(json.loads(existing[0])),result={'artifact_reused':True}))
         return record
 
     def bind_upload(self, operation_id, descriptor):
@@ -182,7 +182,10 @@ class IndexCatalog:
             else:
                 db.execute("UPDATE __vecstor_index_artifacts SET state='READY', last_generation=? WHERE artifact_id=?", [generation, prepared.artifact_id])
             db.execute('INSERT OR REPLACE INTO __vecstor_index_heads VALUES (?, ?, ?)', [snapshot_key(record.key), prepared.artifact_id, generation])
-            result = self._save(replace(record, descriptor=prepared, generation=generation, state='COMMITTED'))
+            statistics=(dict(storage_verify_ms=0.,storage_install_ms=0.,verifier_peak_rss_bytes=None,storage_catalog_commit_ms=None)
+                        if (record.result or {}).get('artifact_reused') else self.store.statistics(prepared))
+            result = self._save(replace(record, descriptor=prepared, generation=generation, state='COMMITTED',
+                result=dict(record.result or {},storage_statistics=statistics)))
             check()
             db.execute('COMMIT')
             return result

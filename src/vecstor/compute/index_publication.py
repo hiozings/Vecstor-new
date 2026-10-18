@@ -96,14 +96,19 @@ class IndexPublicationManager:
                             io.trace['counts']['rpc_payload_bytes'] += frame.ByteSize()
                             yield frame
                     io.trace['counts']['rpc_calls'] += 1
+                    upload_started=time.monotonic()
                     future = self.stub.UploadIndexArtifact.future(measured_frames(), timeout=io.remaining())
                     context.add_callback(future.cancel)
                     try: uploaded = future.result()
                     except grpc.FutureCancelledError as error: raise InterruptedError('artifact upload cancelled') from error
                     io.trace['counts']['rpc_payload_bytes'] += uploaded.ByteSize()
+                    statistics['upload_rpc_ms']=(time.monotonic()-upload_started)*1000
                     require(uploaded.state == 'STAGED', 'artifact_upload_not_acknowledged', 'DATA_LOSS')
+                finalize_started=time.monotonic()
                 record = record_from_proto(io.call(self.stub.FinalizeIndexPublication, pb.FinalizeIndexPublicationRequest(
                     database_id=request.database_id, token=lease.token, operation_id=request.operation_id)))
+                statistics['finalize_rpc_ms']=(time.monotonic()-finalize_started)*1000
+                statistics.update((record.result or {}).get('storage_statistics',{}))
                 return self._result(record), dict(statistics, counts=io.trace['counts'])
             finally: io.close()
 

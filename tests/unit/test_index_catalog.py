@@ -19,6 +19,7 @@ class PreparedStore:
     def __init__(self): self.objects = {}
     def prepared(self, descriptor): return self.objects.get(descriptor.artifact_id) == descriptor
     def abort_later(self, operation): pass
+    def statistics(self, descriptor): return {}
 
 
 @pytest.fixture

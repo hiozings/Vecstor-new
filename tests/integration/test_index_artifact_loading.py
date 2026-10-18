@@ -120,3 +120,12 @@ def test_maintenance_budget_released_after_cancel(cluster, monkeypatch):
     assert cluster[1].list_indexes() == []
     monkeypatch.setattr(service, 'DownloadIndexArtifact', original_download)
     assert cluster[0].LoadIndex(request, timeout=10).descriptor.artifact_id
+
+
+def test_publication_reports_storage_verification_cost(cluster):
+    result=publish(cluster)
+    statistics=json.loads(result.statistics_json)
+    assert statistics['verifier_peak_rss_bytes']>0
+    assert statistics['storage_verify_ms']>=0 and statistics['storage_install_ms']>=0
+    assert statistics['finalize_rpc_ms']>=statistics['storage_verify_ms']
+    assert statistics['storage_catalog_commit_ms'] is None

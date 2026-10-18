@@ -49,6 +49,7 @@ class ArtifactStore:
         self._verifier = BoundedSemaphore(1)
         self._cleanup = ThreadPoolExecutor(max_workers=1, thread_name_prefix='vecstor-artifact-cleanup')
         self._uploads, self._ready, self._pins, self._deleting = {}, {}, {}, set()
+        self._statistics={}
         self._reserved, self._stored = 0, 0
         self.epoch = uuid.uuid4().hex
         self._directory('objects')
@@ -137,9 +138,10 @@ class ArtifactStore:
                 require(upload.alive and upload.sealed, 'artifact_not_sealed', 'FAILED_PRECONDITION')
                 descriptor = upload.descriptor
                 require(descriptor.snapshot_sha256 == snapshot_digest, 'publication_snapshot_receipt_mismatch', 'DATA_LOSS')
-                verify_in_worker(upload.path, descriptor, deadline, cancelled,self.max_verify_bytes)
+                verification=verify_in_worker(upload.path, descriptor, deadline, cancelled,self.max_verify_bytes)
                 if cancelled(): raise InterruptedError('artifact installation cancelled')
                 if time.monotonic() >= deadline: raise TimeoutError('artifact installation deadline exceeded')
+                install_started=time.monotonic()
                 parent = self._directory('objects', descriptor.key.database_id)
                 destination = self._object(descriptor)
                 if destination.exists():
@@ -160,7 +162,11 @@ class ArtifactStore:
                     except BaseException:
                         if temporary.exists(): shutil.rmtree(temporary)
                         raise
-                with self.lock: self._ready[descriptor.artifact_id] = descriptor
+                with self.lock:
+                    self._ready[descriptor.artifact_id] = descriptor
+                    self._statistics[descriptor.artifact_id]=dict(storage_verify_ms=verification['verify_ms'],
+                        storage_install_ms=(time.monotonic()-install_started)*1000,
+                        verifier_peak_rss_bytes=verification['worker_peak_rss_bytes'],storage_catalog_commit_ms=None)
             self.abort_upload(operation)
             return descriptor
         finally:
@@ -187,6 +193,9 @@ class ArtifactStore:
     def prepared(self, descriptor):
         with self.lock:
             return self._ready.get(descriptor.artifact_id) == descriptor and descriptor.artifact_id not in self._deleting
+
+    def statistics(self, descriptor):
+        with self.lock:return dict(self._statistics.get(descriptor.artifact_id,{}))
 
     def _check_files(self, descriptor):
         path = self._object(descriptor)
@@ -253,6 +262,7 @@ class ArtifactStore:
                 shutil.rmtree(path); fsync_directory(path.parent)
             with self.lock:
                 self._ready.pop(descriptor.artifact_id, None)
+                self._statistics.pop(descriptor.artifact_id,None)
                 self._stored -= size
             completed=True
             return size

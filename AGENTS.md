@@ -152,6 +152,7 @@ P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publi
 │   ├── check_gpu_ann.py  # 独立子进程GPU组件能力探测
 │   ├── check_gpu.py      # 真实GPU/PTY/双进程存储隔离和生命周期验收
 │   ├── check_p3.py       # CPU ANN 双路径、真实终端与隔离验收
+│   ├── check_p4_indexes.py # 双计算节点持久工件、重启与隔离生命周期验收
 │   └── generate_proto.py # 生成协议 Python 模块
 ├── proto/vecstor/rpc/services.proto # P2 v1 协议源文件
 ├── proto/vecstor/rpc/sql.proto # v2 目录/SQL/读租约与 P3 快照导出/索引/计划协议
@@ -182,7 +183,7 @@ P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publi
 │   ├── calibrate.py      # 独立校准/留出、带簇负载、冻结配置与恢复运行
 │   └── validate_quality.py # 冻结参数 RPC 对照及实际快照绑定
 ├── benchmarks/gpu/       # calibrate/run质量校准与RPC；sessions热会话/合并RPC对照；batch_probe原生批探测
-├── benchmarks/p4/        # 已发布工件v3质量验证；生命周期与正式验收继续实施
+├── benchmarks/p4/        # 已发布工件v3质量验证与生命周期/并发/资源成本，正式证据在T9
 ├── configs/quality/       # 质量配置示例，绑定实际快照而非通用默认参数
 ├── tests/
 │   ├── unit/             # 数据、SQL、持久事务、协议、终端输入与 PTY 测试
