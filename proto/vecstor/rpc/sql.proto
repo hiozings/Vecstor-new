@@ -215,6 +215,38 @@ message PruneIndexArtifactsResponse {
   uint64 deleted_bytes = 4;
   string state = 5;
 }
+message PublishIndexRequest {
+  string database_id = 1;
+  string table = 2;
+  optional uint32 nlist = 3;
+  optional uint64 seed = 4;
+  string operation_id = 5;
+  optional uint64 expected_generation = 6;
+}
+message PublishIndexResponse { IndexPublicationRecord publication = 1; string statistics_json = 2; }
+message LoadIndexRequest {
+  string database_id = 1;
+  string table = 2;
+  string device = 3;
+  uint32 gpu_id = 4;
+  string expected_artifact_id = 5;
+}
+message LoadIndexResponse {
+  IndexArtifactDescriptor descriptor = 1;
+  uint64 publication_generation = 2;
+  string device = 3;
+  bool reused = 4;
+  string statistics_json = 5;
+}
+message InspectPublishedIndexRequest { string database_id = 1; string table = 2; }
+message InspectPublishedIndexResponse {
+  IndexArtifactDescriptor descriptor = 1;
+  uint64 generation = 2;
+  bool cpu_ready = 3;
+  bool gpu_ready = 4;
+  string state = 5;
+  string index_source = 6;
+}
 service SQLStorage {
   rpc Control(ControlRequest) returns (ControlResponse);
   rpc ExecuteSQL(SQLRequest) returns (stream ResultFrame);
@@ -240,4 +272,10 @@ service SQLCompute {
   rpc BuildIndex(BuildIndexRequest) returns (ControlResponse);
   rpc ListIndexes(IndexRequest) returns (ControlResponse);
   rpc ClearIndexes(IndexRequest) returns (ControlResponse);
+  rpc PublishIndex(PublishIndexRequest) returns (PublishIndexResponse);
+  rpc LoadIndex(LoadIndexRequest) returns (LoadIndexResponse);
+  rpc InspectPublishedIndex(InspectPublishedIndexRequest) returns (InspectPublishedIndexResponse);
+  rpc GetIndexPublication(IndexPublicationRequest) returns (IndexPublicationRecord);
+  rpc ListPublishedIndexes(ListPublishedIndexesRequest) returns (ListPublishedIndexesResponse);
+  rpc PruneIndexArtifacts(PruneIndexArtifactsRequest) returns (PruneIndexArtifactsResponse);
 }

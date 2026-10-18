@@ -2,7 +2,7 @@
 
 本文件适用于整个项目，供团队成员与开发代理共同遵循。记录项目实施计划、目录结构、技术栈和开发约束；后续开发应同步维护，避免文档与实际实现脱节。
 
-最后更新：2026-10-17。
+最后更新：2026-10-18。
 
 ## 1. 项目背景与当前状态
 
@@ -117,7 +117,7 @@ GPU ANN 已按计划接入：SQL SETTINGS逐请求选择CPU/GPU、显式GPU副�
 
 GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复用查询能力并拆分计时，提供可选候选过滤/向量合并RPC（默认关闭、SQL可覆盖）。原生batch1/4/8探测完成；native占比低且GPU排队短，本轮不部署运行时批调度、批内取消或二进制IPC。自动策略/持久版本/GPU覆盖扩展仍分别留给G3—G5/P4。见 [改进验收](docs/validation/gpu-improvements.md)、[问题分析](docs/design/gpu-improvement-analysis.md) 和 [执行计划](docs/superpowers/plans/2026-10-15-gpu-improvements.md)。
 
-P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publication.md)和[九任务实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)，2026-10-17开始实施：T1已增加原生CPU工件格式、完整身份及规范ID/向量摘要校验，52项工件/Faiss定向测试通过；T2已增加目录事务/CAS/读租约绑定并通过35项定向测试；T3已实现工件文件/容量预留/独立校验并通过34项定向测试；T4已接入存储发布/分发RPC，阶段完整真实GPU回归623通过；计算侧显式加载、双节点与恢复等T5—T9仍待实施。拟采用计算侧显式构建、存储侧校验/持久发布、读租约绑定权威工件、双计算节点显式加载与零训练重启恢复；包含批量写入后的完整重建发布、故障注入、旧版本回收、GPU重克隆及质量工件绑定。保留数据库级revision；数据缓存、自适应策略、表级版本和增量维护另行推进。规划中的命令、协议与验收脚本尚不可用，不代表P4验收完成。
+P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publication.md)和[九任务实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)，2026-10-17开始实施：T1已增加原生CPU工件格式、完整身份及规范ID/向量摘要校验，52项工件/Faiss定向测试通过；T2已增加目录事务/CAS/读租约绑定并通过35项定向测试；T3已实现工件文件/容量预留/独立校验并通过34项定向测试；T4已接入存储发布/分发RPC，阶段完整真实GPU回归623通过；T5计算侧显式发布/零训练加载与工件引用已完成并通过41项定向测试；双节点执行绑定与恢复等T6—T9仍待实施。拟采用计算侧显式构建、存储侧校验/持久发布、读租约绑定权威工件、双计算节点显式加载与零训练重启恢复；包含批量写入后的完整重建发布、故障注入、旧版本回收、GPU重克隆及质量工件绑定。保留数据库级revision；数据缓存、自适应策略、表级版本和增量维护另行推进。规划中的命令、协议与验收脚本尚不可用，不代表P4验收完成。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -164,7 +164,7 @@ P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publi
 │   ├── cli.py            # 命令行参数和产物输出
 │   ├── isolation.py      # 计算进程 Landlock 权限与拒绝读取探针
 │   ├── storage/          # service.py兼容P2；catalog/database/sql_service管理库/事务/租约，index_catalog/index_artifacts/index_service管理索引目录、工件与发布RPC
-│   ├── compute/          # P2 RemoteEngine、v2 路由、lease_io/index_manager/vector_execution
+│   ├── compute/          # P2 RemoteEngine、v2路由/执行、lease_io/index_manager与index_publication显式发布加载
 │   ├── index/            # CPU工件格式/摘要校验、GPU worker/副本、CPU IVF、快照键、有界registry与构建进程
 │   ├── rpc/              # v1/v2 协议、能力缓存会话客户端、timing接入计时、类型化结果、生命周期和验收
 │   ├── shell/            # app/buffer/commands/render/completion：交互界面及分句
@@ -300,7 +300,8 @@ src/vecstor/
 ### 环境依赖相关问题
 
 - 本地已有可用的显卡，可通过 `nvidia-smi` 查看，若检测不到则应该是沙箱权限等限制，此时允许在沙箱外检测和使用显卡。
-- 已验证本机 RTX 4060 Laptop GPU（8188 MiB）、驱动 580.178.04 可运行当前环境。GPU 和 localhost gRPC 检查可能需要沙箱外执行；`--cpu-only` 明确跳过 GPU，不能据此声称 GPU 验证成功。
+- 2026-10-18迁移后已验证本机 RTX 4060 Laptop GPU（8188 MiB）、驱动615.78.08可运行锁定环境（旧系统驱动580.178.04）。GPU 和 localhost gRPC 检查可能需要沙箱外执行；`--cpu-only` 明确跳过 GPU，不能据此声称 GPU 验证成功。
+- 新系统CachyOS/Miniforge的78个Conda包与锁定文件一致，环境/真实GPU检查和Conda健康检查通过；初检项目入口未注册，原样业务回归551通过/81失败。临时指定源码PYTHONPATH后632项完整真实GPU回归通过，无跳过；同日已按授权补注册本项目，清除PYTHONPATH后632项完整真实GPU回归通过（180.97秒，无跳过）。检查及修复记录见[环境说明](docs/environment.md)，未安装额外依赖，也不代表P4验收完成。
 - 环境操作与复现说明见 [docs/environment.md](docs/environment.md)。已有 `vecstor` 环境时先检查再更新，不重复创建，不修改 `base` 或系统驱动。
 - P2 的 `--isolate-storage-dir` 在导入计算库、启动线程前应用 Landlock，失败必须停止，不降级；默认普通启动模式不改变文件权限。正式隔离证据必须同时包含目录/文件读取拒绝和远程查询成功。
 - P2.5 隔离整个 data-root，探针可用 imports 内 NPZ 或 databases 内 DuckDB 文件；空目录需先准备托管源或数据库。正式验收使用 `python scripts/check_shell.py --output-dir results/shell-check --rows 10000`，目标目录不能已存在。

@@ -33,6 +33,10 @@ class SQLComputeService(rpc.SQLComputeServicer):
             except (grpc.RpcError,ValueError,TypeError) as error:
                 self.channel.close();raise ValueError('Storage does not support fused candidate reads') from error
         self.index_manager=IndexManager(self.stub,max_bytes=index_memory_mib*1024*1024,max_entries=index_max_entries,gpu_options=gpu_options)
+        from vecstor.compute.index_publication import IndexPublicationManager
+        manager = self.index_manager
+        self.publication = IndexPublicationManager(self.stub, manager.registry, manager.build_from_lease,
+                                                   manager.build_slot, manager.gpu_registry, manager.gpu_worker)
 
     def close(self):
         self.index_manager.close();self.channel.close()
@@ -106,7 +110,53 @@ class SQLComputeService(rpc.SQLComputeServicer):
     def GetSearchCapabilities(self,request,context):
         return pb.ControlResponse(json_result=json.dumps({'server_instance_id':self.server_instance_id,'fused_candidates':self.fused_candidates,'candidate_data_paths':['separate','fused'] if self.fused_candidates else ['separate'],'ann':True,'algorithm':'cpu_ivfflat',
             'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':True,'gpu_paths':['search-first'],'gpu_max_search_k':2048,'gpu_max_nprobe':2048,
-            'execution_settings_version':1,'index_devices_version':1,'quality_profiles':self.quality_catalog.list()}))
+            'execution_settings_version':1,'index_devices_version':1,'index_publication_version':1,
+            'index_source':getattr(self,'index_source','local'),'quality_profiles':self.quality_catalog.list()}))
+
+    def _index_error(self, context, error):
+        from vecstor.index.artifact import ArtifactError
+        if isinstance(error, RemoteError): context.abort(error.code, error.details)
+        if isinstance(error, grpc.RpcError): context.abort(error.code(), error.details())
+        if isinstance(error, ArtifactError): context.abort(getattr(grpc.StatusCode, error.code), str(error))
+        if isinstance(error, InterruptedError): context.abort(grpc.StatusCode.CANCELLED, str(error))
+        if isinstance(error, TimeoutError): context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, str(error))
+        context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(error))
+
+    def PublishIndex(self, request, context):
+        from vecstor.rpc.index_codec import record_to_proto
+        try:
+            record, stats = self.publication.publish(request, context)
+            return pb.PublishIndexResponse(publication=record_to_proto(record), statistics_json=json.dumps(stats))
+        except (ValueError, OSError, grpc.RpcError, RemoteError) as error: self._index_error(context, error)
+
+    def LoadIndex(self, request, context):
+        from vecstor.rpc.index_codec import descriptor_to_proto
+        try:
+            output = self.publication.load(request, context)
+            return pb.LoadIndexResponse(descriptor=descriptor_to_proto(output['descriptor']),
+                publication_generation=output['publication_generation'], device=output['device'], reused=output['reused'],
+                statistics_json=json.dumps(output['statistics']))
+        except (ValueError, OSError, grpc.RpcError, RemoteError) as error: self._index_error(context, error)
+
+    def InspectPublishedIndex(self, request, context):
+        from vecstor.rpc.index_codec import descriptor_to_proto
+        try:
+            output = self.publication.inspect(request, context)
+            return pb.InspectPublishedIndexResponse(descriptor=descriptor_to_proto(output.descriptor) if output.descriptor else None,
+                generation=output.generation, cpu_ready=output.cpu_ready, gpu_ready=output.gpu_ready,
+                state=output.state, index_source=getattr(self,'index_source','local'))
+        except (ValueError, OSError, grpc.RpcError, RemoteError) as error: self._index_error(context, error)
+
+    def _index_proxy(self, name, request, context):
+        call = getattr(self.stub, name).future(request, timeout=min(60, context.time_remaining() or 15))
+        context.add_callback(call.cancel)
+        try: return call.result()
+        except grpc.FutureCancelledError: context.abort(grpc.StatusCode.CANCELLED, 'Index management cancelled')
+        except grpc.RpcError as error: context.abort(error.code(), error.details())
+
+    def GetIndexPublication(self, request, context): return self._index_proxy('GetIndexPublication', request, context)
+    def ListPublishedIndexes(self, request, context): return self._index_proxy('ListPublishedIndexes', request, context)
+    def PruneIndexArtifacts(self, request, context): return self._index_proxy('PruneIndexArtifacts', request, context)
 
     def BuildIndex(self,request,context):
         try:

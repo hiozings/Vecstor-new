@@ -163,6 +163,7 @@ class LeaseIO:
         consistent(self.lease.HasField('row_count'),'Snapshot export requires row count')
         self.trace['counts']['snapshot_calls']+=1
         total=self.lease.row_count;count=0;previous=-1;batches=0
+        self.snapshot_sha256 = None
         for batch in self.stream(self.stub.StreamVectorSnapshot,pb.SnapshotRequest(database_id=self.database_id,token=self.lease.token,batch_rows=self.batch_size)):
             batches+=1;self._version(batch)
             ids=np.asarray(batch.ids,dtype=np.int64)
@@ -177,5 +178,11 @@ class LeaseIO:
             vectors=np.frombuffer(batch.vectors_f32_le,dtype='<f4').reshape(len(ids),self.lease.dimension)
             consistent(np.isfinite(vectors).all(),'Nonfinite snapshot vectors')
             count+=len(ids)
+            if self.lease.index_publication_version:
+                consistent(batch.snapshot_complete == (count == total), 'Snapshot final marker mismatch')
+                if batch.snapshot_complete:
+                    consistent(len(batch.snapshot_sha256) == 64, 'Missing snapshot digest')
+                    self.snapshot_sha256 = batch.snapshot_sha256
+                else: consistent(not batch.snapshot_sha256, 'Premature snapshot digest')
             yield ids,vectors
         consistent(batches>0 and count==total,'Incomplete vector snapshot')

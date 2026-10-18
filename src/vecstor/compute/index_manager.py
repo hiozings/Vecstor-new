@@ -29,6 +29,41 @@ class IndexManager:
 
     def close(self):self.gpu_worker.close()
 
+    def build_from_lease(self, io, config):
+        from vecstor.index.artifact import SnapshotHasher
+        lease = io.lease
+        n = lease.row_count
+        key = IndexKey.from_lease(lease, config)
+        start = time.monotonic()
+        estimate = n*(4*lease.dimension+8)*4+min(n, config.train_rows)*lease.dimension*4
+        try: self.registry.prepare_build(key, estimate, check=io.remaining)
+        except RemoteError: raise
+        except ValueError as error: raise RemoteError(grpc.StatusCode.RESOURCE_EXHAUSTED, str(error)) from error
+        ids = np.empty(n, dtype=np.int64)
+        vectors = np.empty((n, lease.dimension), dtype=np.float32)
+        hasher = SnapshotHasher(n, lease.dimension)
+        offset = 0
+        receipt = ''
+        for labels, values in io.snapshot():
+            ids[offset:offset+len(labels)] = labels
+            vectors[offset:offset+len(labels)] = values
+            hasher.add(labels, values)
+            offset += len(labels)
+        consistent(offset == n, 'Incomplete build input')
+        receipt = hasher.finish()
+        if lease.index_publication_version:
+            consistent(getattr(io, 'snapshot_sha256', None) == receipt, 'Snapshot digest mismatch')
+        maximum = float(np.abs(vectors).max())
+        if maximum > np.sqrt(.25*float(np.finfo(np.float32).max)/(4*lease.dimension)):
+            raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION, 'Snapshot exceeds safe Faiss float32 distance range')
+        handle, statistics = build_in_worker(ids, vectors, config, io.deadline, cancelled=lambda:not io.context.is_active())
+        io.remaining()
+        consistent(handle.row_count == n and handle.dimension == lease.dimension and handle.nlist == config.nlist, 'Built index metadata mismatch')
+        statistics.update(estimated_build_bytes=estimate, build_total_ms=(time.monotonic()-start)*1000,
+                          export_rpc_calls=io.trace['counts']['rpc_calls'], export_payload_bytes=io.trace['counts']['rpc_payload_bytes'],
+                          snapshot_sha256=receipt)
+        return handle, statistics
+
     def build(self,request,context):
         if request.device not in ('','cpu','gpu') or request.gpu_id!=0:raise ValueError('Invalid index device')
         if request.device!='gpu':return dict(self._build_cpu(request,context),device='cpu')
@@ -101,24 +136,8 @@ class IndexManager:
             entry=self.registry.reactivate(key,check=io.remaining)
             if entry is not None:
                 return dict(entry.describe(),state='ready',reused=True)
-            # Residency budget and transient build estimate are separately named.
-            estimate=n*(4*lease.dimension+8)*4+min(n,config.train_rows)*lease.dimension*4
-            try: self.registry.prepare_build(key,estimate,check=io.remaining)
-            except RemoteError: raise
-            except ValueError as error: raise RemoteError(grpc.StatusCode.RESOURCE_EXHAUSTED,str(error)) from error
-            ids=np.empty(n,dtype=np.int64);vectors=np.empty((n,lease.dimension),dtype=np.float32)
-            offset=0
-            for labels,values in io.snapshot():
-                ids[offset:offset+len(labels)]=labels;vectors[offset:offset+len(labels)]=values;offset+=len(labels)
-            consistent(offset==n,'Incomplete build input')
-            maximum=float(np.abs(vectors).max())
-            if maximum>np.sqrt(.25*float(np.finfo(np.float32).max)/(4*lease.dimension)):
-                raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'Snapshot exceeds safe Faiss float32 distance range')
-            handle,statistics=build_in_worker(ids,vectors,config,deadline,cancelled=lambda:not context.is_active())
-            io.remaining()
-            consistent(handle.row_count==n and handle.dimension==lease.dimension and handle.nlist==config.nlist,'Built index metadata mismatch')
-            statistics.update(estimated_build_bytes=estimate,build_total_ms=(time.monotonic()-start)*1000,
-                              export_rpc_calls=trace['counts']['rpc_calls'],export_payload_bytes=trace['counts']['rpc_payload_bytes'])
+            io.lease, io.context, io.deadline, io.trace = lease, context, deadline, trace
+            handle, statistics = self.build_from_lease(io, config)
             try: entry=self.registry.publish(key,handle,request.table,statistics,check=io.remaining)
             except RemoteError: raise
             except ValueError as error: raise RemoteError(grpc.StatusCode.RESOURCE_EXHAUSTED,str(error)) from error

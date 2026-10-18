@@ -14,12 +14,16 @@ class IndexEntry:
     table: str
     statistics: dict = field(default_factory=dict)
     pins: int = 0
+    descriptor: object = None
 
     def describe(self):
-        return dict(asdict(self.key), table=self.table, nlist=self.handle.nlist,
+        value = dict(asdict(self.key), table=self.table, nlist=self.handle.nlist,
                     row_count=self.handle.row_count, byte_size=self.handle.byte_size,
                     byte_size_kind='estimated_serialized', max_abs=self.handle.max_abs,
                     pins=self.pins, **self.statistics)
+        if self.descriptor:
+            value.update(artifact_id=self.descriptor.artifact_id, payload_sha256=self.descriptor.payload_sha256)
+        return value
 
 
 class IndexRegistry:
@@ -141,6 +145,30 @@ class IndexRegistry:
         with self._lock:
             return [entry.describe() for entry in self._entries.values()
                     if (not database_id or entry.key.database_id == database_id) and (not table or entry.table == table)]
+
+    def check_artifact_slot(self, descriptor):
+        from .artifact import require
+        with self._lock:
+            existing = self._entries.get(descriptor.key)
+            require(existing is None or existing.descriptor == descriptor, 'local_index_artifact_conflict', 'FAILED_PRECONDITION')
+
+    def publish_artifact(self, descriptor, handle, table, statistics, check):
+        with self._lock:
+            self.check_artifact_slot(descriptor)
+            entry = self.publish(descriptor.key, handle, table, statistics, check)
+            entry.descriptor = descriptor
+            return entry
+
+    @contextmanager
+    def acquire_exact(self, key, artifact_id):
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is not None and (entry.descriptor is None or entry.descriptor.artifact_id != artifact_id): entry = None
+            if entry: entry.pins += 1
+        try: yield entry
+        finally:
+            if entry:
+                with self._lock: entry.pins -= 1
 
     def clear(self, database_id, table=''):
         removed = busy = 0

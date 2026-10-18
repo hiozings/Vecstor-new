@@ -782,6 +782,36 @@ class SQLComputeStub:
                 request_serializer=vecstor_dot_rpc_dot_sql__pb2.IndexRequest.SerializeToString,
                 response_deserializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
                 _registered_method=True)
+        self.PublishIndex = channel.unary_unary(
+                '/vecstor.v2.SQLCompute/PublishIndex',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.PublishIndexRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.PublishIndexResponse.FromString,
+                _registered_method=True)
+        self.LoadIndex = channel.unary_unary(
+                '/vecstor.v2.SQLCompute/LoadIndex',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.LoadIndexRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.LoadIndexResponse.FromString,
+                _registered_method=True)
+        self.InspectPublishedIndex = channel.unary_unary(
+                '/vecstor.v2.SQLCompute/InspectPublishedIndex',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.InspectPublishedIndexRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.InspectPublishedIndexResponse.FromString,
+                _registered_method=True)
+        self.GetIndexPublication = channel.unary_unary(
+                '/vecstor.v2.SQLCompute/GetIndexPublication',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.IndexPublicationRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.IndexPublicationRecord.FromString,
+                _registered_method=True)
+        self.ListPublishedIndexes = channel.unary_unary(
+                '/vecstor.v2.SQLCompute/ListPublishedIndexes',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.ListPublishedIndexesRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.ListPublishedIndexesResponse.FromString,
+                _registered_method=True)
+        self.PruneIndexArtifacts = channel.unary_unary(
+                '/vecstor.v2.SQLCompute/PruneIndexArtifacts',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.PruneIndexArtifactsRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.PruneIndexArtifactsResponse.FromString,
+                _registered_method=True)
 
 
 class SQLComputeServicer:
@@ -823,6 +853,42 @@ class SQLComputeServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def PublishIndex(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def LoadIndex(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def InspectPublishedIndex(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetIndexPublication(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListPublishedIndexes(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def PruneIndexArtifacts(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SQLComputeServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -855,6 +921,36 @@ def add_SQLComputeServicer_to_server(servicer, server):
                     servicer.ClearIndexes,
                     request_deserializer=vecstor_dot_rpc_dot_sql__pb2.IndexRequest.FromString,
                     response_serializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.SerializeToString,
+            ),
+            'PublishIndex': grpc.unary_unary_rpc_method_handler(
+                    servicer.PublishIndex,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.PublishIndexRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.PublishIndexResponse.SerializeToString,
+            ),
+            'LoadIndex': grpc.unary_unary_rpc_method_handler(
+                    servicer.LoadIndex,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.LoadIndexRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.LoadIndexResponse.SerializeToString,
+            ),
+            'InspectPublishedIndex': grpc.unary_unary_rpc_method_handler(
+                    servicer.InspectPublishedIndex,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.InspectPublishedIndexRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.InspectPublishedIndexResponse.SerializeToString,
+            ),
+            'GetIndexPublication': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetIndexPublication,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.IndexPublicationRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.IndexPublicationRecord.SerializeToString,
+            ),
+            'ListPublishedIndexes': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListPublishedIndexes,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.ListPublishedIndexesRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.ListPublishedIndexesResponse.SerializeToString,
+            ),
+            'PruneIndexArtifacts': grpc.unary_unary_rpc_method_handler(
+                    servicer.PruneIndexArtifacts,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.PruneIndexArtifactsRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.PruneIndexArtifactsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1019,6 +1115,168 @@ class SQLCompute:
             '/vecstor.v2.SQLCompute/ClearIndexes',
             vecstor_dot_rpc_dot_sql__pb2.IndexRequest.SerializeToString,
             vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PublishIndex(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLCompute/PublishIndex',
+            vecstor_dot_rpc_dot_sql__pb2.PublishIndexRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.PublishIndexResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def LoadIndex(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLCompute/LoadIndex',
+            vecstor_dot_rpc_dot_sql__pb2.LoadIndexRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.LoadIndexResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def InspectPublishedIndex(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLCompute/InspectPublishedIndex',
+            vecstor_dot_rpc_dot_sql__pb2.InspectPublishedIndexRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.InspectPublishedIndexResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetIndexPublication(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLCompute/GetIndexPublication',
+            vecstor_dot_rpc_dot_sql__pb2.IndexPublicationRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.IndexPublicationRecord.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListPublishedIndexes(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLCompute/ListPublishedIndexes',
+            vecstor_dot_rpc_dot_sql__pb2.ListPublishedIndexesRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.ListPublishedIndexesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PruneIndexArtifacts(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLCompute/PruneIndexArtifacts',
+            vecstor_dot_rpc_dot_sql__pb2.PruneIndexArtifactsRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.PruneIndexArtifactsResponse.FromString,
             options,
             channel_credentials,
             insecure,

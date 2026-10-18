@@ -29,7 +29,7 @@ conda run --no-capture-output -n vecstor python scripts/check_environment.py
 
 ## GPU 与隔离环境
 
-已确认本机硬件为 NVIDIA GeForce RTX 4060 Laptop GPU，显存 8188 MiB，驱动 580.178.04。`nvidia-smi` 显示的 CUDA 13.0 是驱动支持能力，不代表项目必须使用 CUDA 13。
+2026-10-18 迁移后确认本机硬件仍为 NVIDIA GeForce RTX 4060 Laptop GPU，显存 8188 MiB，驱动为 615.78.08（旧系统为 580.178.04）。项目继续使用锁定的 CUDA 12.4 运行库；`nvidia-smi` 的 CUDA 版本表示驱动支持能力，不是项目运行库版本。
 
 沙箱可能限制 NVIDIA 设备或本地网络监听。此时应在获得授权的沙箱外运行上述验证，不能将沙箱内设备访问失败直接归因于驱动损坏。环境安装不修改系统驱动，不安装完整 CUDA 编译工具链；使用预编译 Faiss GPU 所需的 CUDA 运行库。
 
@@ -61,6 +61,8 @@ conda list -n vecstor --explicit --md5 > environments/vecstor-linux-64.explicit.
 
 ## 2026-10-10 验证记录
 
+以下为原系统历史记录。新系统结果见下方迁移检查，不能将历史入口安装状态视为新环境已安装。
+
 安装前检查：Conda 25.11.1 已存在，只有 `base` 环境；项目依赖在该环境中均未安装。新建 `vecstor`，保留 `base` 和系统驱动，复用 Conda 缓存。下载中的连接中断由重试恢复，安装命令最终退出码为 0。
 
 | 依赖 | 实际版本 |
@@ -82,3 +84,28 @@ conda list -n vecstor --explicit --md5 > environments/vecstor-linux-64.explicit.
 - `conda run -n vecstor python -m pytest --version`：退出码 0，输出 pytest 9.1.1；仅验证测试工具入口，没有业务测试用例。
 
 不将上述结果解释为性能结论、跨机部署验证或 P1 全部完成。
+
+## 2026-10-18 系统迁移检查
+
+系统为 CachyOS，Linux 7.2.9-2-cachyos x86_64、glibc 2.44；Conda 26.7.2 来自 Miniforge，`vecstor` 环境存在。78 个 Conda 包的版本、构建及包 MD5 记录与精确锁定文件一致。`conda doctor -n vecstor --json` 的实际文本报告确认无缺失/改动包文件、环境一致且支持文件锁；本次没有使用 `--fix`。Python 和全部直接依赖版本与 `environment.yml` 一致，`pip check` 无依赖冲突。
+
+在沙箱外实际执行环境检查，SQL、Faiss CPU/GPU Flat/IVFFlat、索引保存/加载/GPU恢复、临时Protobuf编译和localhost TCP gRPC全部通过。Faiss、NumPy、DuckDB、gRPC、SSL扩展的动态链接无缺失库。Landlock ABI为10；GPU在沙箱内不可访问、沙箱外正常，不判为驱动故障。Conda环境和项目目录在宿主机可写。
+
+**迁移遗漏尚未修复：本项目没有注册进新环境。** `pip show vecstor` 找不到包，`conda run -n vecstor vecstor --help` 找不到命令，`python -m vecstor` 无法导入。原样完整回归为551通过、81失败（93.35秒），失败涉及构建/GPU/验证子进程无法导入`vecstor`。
+
+仅对测试进程临时设置 `PYTHONPATH` 指向当前项目的 `src`，并设置 `OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECSTOR_REQUIRE_GPU=1` 后，当前工作区完整回归 **632通过，175.54秒，无跳过**。这说明源码路径可解析时依赖与业务测试正常，不代表console-script已经修复，也不代表未完成的P4阶段已经验收。
+
+另执行1万行×128维P1演示，12个正确性用例通过；在临时目录重新生成协议，四个生成模块与当前源码逐字节一致，未改写仓库生成文件。
+
+从项目根目录执行以下命令即可补做项目注册（**本次检查未执行安装**）：
+
+```bash
+conda run --no-capture-output -n vecstor python -m pip install --no-deps --no-build-isolation -e .
+conda run --no-capture-output -n vecstor vecstor --help
+```
+
+注册完成后应在不额外指定`PYTHONPATH`的情况下复跑完整业务测试。本次没有安装/升级依赖、修改驱动或业务代码。完整报告、原样失败日志、源码路径复测日志和文件摘要保存在 `results/environment-migration-20261018-f1l31ij8/`（Git忽略），不属于性能实验或新环境独立重建验收。
+
+### 同日补注册与无临时路径复验
+
+按用户授权执行 `python -m pip install --no-deps --no-build-isolation -e .`，仅注册本项目 `vecstor 0.2.5.dev0`，没有安装额外依赖。清除PYTHONPATH后，`vecstor --help`、模块导入和pip check通过；强制真实GPU的完整回归 **632通过，180.97秒，无跳过**。原迁移遗漏已修复；保留上面的初检失败记录，不将条件复测替换为无条件成功。证据为同一results目录的registration-suite.log和registration-recheck.json。

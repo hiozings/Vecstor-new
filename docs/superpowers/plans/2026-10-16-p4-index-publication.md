@@ -156,13 +156,13 @@ def test_digest_is_independent_of_batch_partition(snapshot):
 - `IndexRegistry.acquire_exact(key: IndexKey, artifact_id: str) -> ContextManager[IndexEntry | None]`；`publish_artifact(descriptor: ArtifactDescriptor, handle: FaissIndex, table: str, statistics: dict, check: Callable) -> IndexEntry`；IndexEntry 增加可选descriptor（local为None）。
 - `PublishIndexRequest/Response`、`LoadIndexRequest/Response`、`InspectPublishedIndexRequest/Response` 与代理RPC加入 SQLCompute，字段见设计5.2。
 
-- [ ] 写失败测试：`test_load_never_calls_build_worker`、`test_wrong_expected_artifact_rejected`、`test_partial_download_never_activates`、`test_pinned_local_conflict_is_not_overwritten`、`test_publish_success_survives_local_load_failure`、`test_maintenance_budget_released_after_cancel`。
-- [ ] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_publication_manager.py tests/integration/test_index_artifact_loading.py` 记录失败。
-- [ ] 提取租约构建函数，复用总deadline与CPU维护名额；原显式CPU/GPU BuildIndex路径回归。发布优先查询op状态并比较原始请求意图/已有key，避免响应丢失后重新训练；测试同ID在数据推进后重试仍返回原成功，不同参数仍拒绝。
-- [ ] 实现分块下载缓冲和完整校验、预算估算与最终原子本地发布；本地操作报告 `trained=false`、下载字节、artifact_id、来源generation。客户端拿到完整流之前不能暴露可查询对象。此任务LoadIndex只实现CPU，GPU请求明确不支持，T7再接入克隆。
-- [ ] 实现按完整工件身份获取，pin计数/预算与旧registry兼容；同key不同或无绑定对象显式冲突，禁止原地修改被引用句柄。
-- [ ] 运行新测试及 `tests/unit/test_index_registry.py tests/unit/test_index_manager.py tests/integration/test_p3_execution.py`；新proto再生成并检查。
-- [ ] 审查总deadline传播、子进程数和错误结果；授权时提交 `feat: load published indexes without retraining`。
+- [x] 写失败测试：`test_load_never_calls_build_worker`、`test_wrong_expected_artifact_rejected`、`test_partial_download_never_activates`、`test_pinned_local_conflict_is_not_overwritten`、`test_publish_success_survives_local_load_failure`、`test_maintenance_budget_released_after_cancel`。
+- [x] 运行 `conda run -n vecstor python -m pytest -q tests/unit/test_index_publication_manager.py tests/integration/test_index_artifact_loading.py` 记录失败。
+- [x] 提取租约构建函数，复用总deadline与CPU维护名额；原显式CPU/GPU BuildIndex路径回归。发布优先查询op状态并比较原始请求意图/已有key，避免响应丢失后重新训练；测试同ID在数据推进后重试仍返回原成功，不同参数仍拒绝。
+- [x] 实现分块下载缓冲和完整校验、预算估算与最终原子本地发布；本地操作报告 `trained=false`、下载字节、artifact_id、来源generation。客户端拿到完整流之前不能暴露可查询对象。此任务LoadIndex只实现CPU，GPU请求明确不支持，T7再接入克隆。
+- [x] 实现按完整工件身份获取，pin计数/预算与旧registry兼容；同key不同或无绑定对象显式冲突，禁止原地修改被引用句柄。
+- [x] 运行新测试及 `tests/unit/test_index_registry.py tests/unit/test_index_manager.py tests/integration/test_p3_execution.py`；新proto再生成并检查。
+- [x] 审查总deadline传播、子进程数和错误结果；授权时提交 `feat: load published indexes without retraining`。
 
 ## Task 6：published 查询模式与双节点切换安全性
 
@@ -291,3 +291,7 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 - T3不可变文件、容量预留及独立验证进程完成；34项工件/存储/worker测试通过（1.92秒），含父目录fsync失败后的孤儿容量回归先失败再修复。T4—T9继续。
 
 - T4增量存储RPC、类型化帧、同租约导出收据与分发完成；34项定向通过，后补摘要冒认单项通过；阶段完整真实GPU回归623通过（195.44秒）。proto重复生成字节一致。T5失败测试已建立，T5—T9继续。
+
+## 继续实施（2026-10-18）
+
+- 补注册后清除PYTHONPATH的真实GPU完整回归632通过（180.97秒）。T5计算发布/加载与精确工件引用完成，含取消回收，41项定向回归通过；T6—T9继续。CPU加载在确认存储验证和字节摘要后使用现有父进程原生解码方式，设计7.2已说明该取舍与故障范围。
