@@ -85,6 +85,21 @@ def test_preload_has_no_training_or_snapshot_export(tmp_path,monkeypatch):
         assert results[0]['statistics']['artifact_download_bytes']>0
 
 
+def test_preload_rechecks_head_after_loading(tmp_path,monkeypatch):
+    import time
+    from vecstor.compute.index_recovery import preload_indexes
+    with running(tmp_path) as env:
+        seed(tmp_path,env)
+        original=env.engine.publication.load
+        def changed(*args,**kwargs):
+            result=original(*args,**kwargs)
+            env.client.publish_index('items',nlist=2,operation_id='changed-head')
+            return result
+        monkeypatch.setattr(env.engine.publication,'load',changed)
+        with pytest.raises(ValueError,match='changed during startup'):
+            preload_indexes(env.engine.publication,[dict(database='demo',table='items',device='cpu')],time.monotonic()+60)
+
+
 def test_preload_failure_prevents_ready(tmp_path):
     import json
     from vecstor.rpc.acceptance import ServiceProcess

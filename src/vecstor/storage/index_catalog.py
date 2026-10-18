@@ -252,12 +252,13 @@ class IndexCatalog:
             check()
             records=db.execute("SELECT artifact_id,table_id,state,last_generation FROM __vecstor_index_artifacts WHERE state IN ('READY','CORRUPT') ORDER BY last_generation DESC,artifact_id").fetchall()
             protected=set(self.active_artifacts()) | set(self.store.transfer_pins)
+            tables={row[0] for row in db.execute('SELECT table_id FROM __vecstor_tables').fetchall()}
             counts={}
             for identity,table_id,_,_ in records:
+                if table_id not in tables:continue
                 counts[table_id]=counts.get(table_id,0)+1
                 if counts[table_id]<=keep_last:protected.add(identity)
             revision=db.execute('SELECT revision FROM __vecstor_meta').fetchone()[0]
-            tables={row[0] for row in db.execute('SELECT table_id FROM __vecstor_tables').fetchall()}
             for snapshot,identity in db.execute('SELECT snapshot_json,artifact_id FROM __vecstor_index_heads').fetchall():
                 key=json.loads(snapshot)
                 if key[2]==revision and key[1] in tables:protected.add(identity)

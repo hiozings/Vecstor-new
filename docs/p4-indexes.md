@@ -61,7 +61,7 @@ GPU恢复使用`.index load items --device gpu`；从相同CPU工件重新克隆
 .index prune --keep-last 2 --execute --operation-id prune-20261018
 ```
 
-默认是只读预览。keep-last按每table_id最近激活的不同工件计数，额外保护当前数据head、有效读租约、下载引用和正在发布的工件；被保护的数量可以超过keep-last。回收保留key/digest墓碑和幂等结果，相同key不能复活为不同字节。deleted_bytes是工件payload加manifest的逻辑字节，不是文件系统实际释放块数。
+默认是只读预览。keep-last按每个仍存在的table_id最近激活的不同工件计数，额外保护当前数据head、有效读租约、下载引用和正在发布的工件；被保护的数量可以超过keep-last。已DROP的表在租约/下载等引用释放后可回收全部工件，同名重建使用新的table_id。回收保留key/digest墓碑和幂等结果，相同key不能复活为不同字节。deleted_bytes是工件payload加manifest的逻辑字节，不是文件系统实际释放块数。
 
 存储参数：`--index-artifact-max-mib 256`（v1格式上限，可调低）、`--index-storage-mib 2048`、`--index-disk-margin-mib 256`、`--index-verifier-memory-mib 512`。原有CPU驻留预算256MiB/8条目、GPU预算等仍独立生效；工作集/RSS估算不是硬限。预算不足明确拒绝，不强删被引用对象。
 

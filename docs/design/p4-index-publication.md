@@ -237,7 +237,9 @@ sequenceDiagram
 
 ### 7.3 回收协议
 
-默认按最近激活序号保留每 table_id 最近 2 个不同的已提交工件，另保护当前数据快照的 head、所有有效读租约固定的工件、下载 pin 和正在提交的工件。`.index clear` 只释放计算内存，不删除存储数据；存储回收为单独显式 prune，默认 dry-run，`--execute` 才实施。
+默认按最近激活序号保留每个仍存在的 table_id 最近 2 个不同的已提交工件，另保护当前数据快照的 head、所有有效读租约固定的工件、下载 pin 和正在提交的工件。`.index clear` 只释放计算内存，不删除存储数据；存储回收为单独显式 prune，默认 dry-run，`--execute` 才实施。
+
+已DROP的table_id不再应用keep-last保留，仍保护有效租约、下载pin和进行中的发布；同名重建的新table_id独立保留。引用释放后可回收旧表全部工件，但保留墓碑和操作结果。
 
 GC 在 Database 队列中确认租约及 head，并在短临界区固定删除集合、标记 RETIRED/删除旧 head；随后退出队列删除文件、fsync 父目录，最终标记 DELETED。读取工件时在同一权威检查点建立下载 pin，再打开文件；GC 与 pin 获取必须有共同锁序，禁止先检查无 pin 再无锁删除。
 
@@ -316,7 +318,7 @@ publish 从新租约取得 expected_generation；API 使用者可显式指定，
 
 成本报告至少包含构建/发布/下载/恢复/克隆时间、索引滞后窗口、各节点就绪时间、RPC Protobuf 字节、磁盘工件和 staging 峰值、compute/storage/build/verifier/GPU worker RSS、显存采样、回退比例和结果不足比例。定义 `lag_to_publish=t_publish_commit-t_data_commit`，`lag_to_ready=max(t_A_ready,t_B_ready)-t_data_commit`；并发数据写入时按 revision 分别计算，不混合事件。
 
-拟验收命令（脚本尚未实现）：
+验收命令（脚本已实现，实际证据见[验收记录](../validation/p4-indexes.md)）：
 
 ```bash
 conda run --no-capture-output -n vecstor python scripts/check_p4_indexes.py --output-dir results/p4-indexes-10k --rows 10000 --dimension 128
@@ -335,4 +337,4 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECSTOR_REQUIRE_GPU=1 conda run --no-ca
 
 资料核对（2026-10-16）：Faiss 官方说明 CPU 序列化/反序列化及 GPU 工件需转 CPU，且原生读取不负责验证文件完整性，因此本设计在读取前校验封装长度/hash并独立验证结构。[Faiss Index I/O](https://github.com/facebookresearch/faiss/wiki/Index-IO,-cloning-and-hyper-parameter-tuning)。Python 3.12 提供文件 fsync 和同文件系统 rename/replace 原语，原子改名本身不能代替文件及目录持久化。[Python os](https://docs.python.org/3.12/library/os.html#os.fsync)。DuckDB 的单进程写入、MVCC 基础与现有每库队列方向一致；本设计不引入第二进程直接写同库。[DuckDB 并发模型](https://duckdb.org/docs/current/connect/concurrency)。
 
-上述资料支持机制选择，不替代安装版本的协议、崩溃和性能验收。本轮只完成设计与计划文档检查，没有运行新的业务测试或宣布 P4 实现成功。
+上述资料支持机制选择，不替代安装版本的协议、崩溃和性能验收。初始设计轮只完成文档检查；2026-10-17起实施及后续真实验收另见执行记录，不把设计依据当作验收结果。

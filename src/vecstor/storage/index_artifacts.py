@@ -60,14 +60,16 @@ class ArtifactStore:
 
     def _directory(self, *parts):
         path = self.root
+        fsync_directory(path.parent)
         for part in parts:
             require(isinstance(part, str) and re.fullmatch('[A-Za-z0-9_-]{1,128}', part), 'invalid_artifact_path')
             path = path/part
             require(not path.is_symlink(), 'artifact_directory_symlink', 'DATA_LOSS')
             if not path.exists():
                 path.mkdir()
-                fsync_directory(path.parent)
             require(path.is_dir(), 'invalid_artifact_directory', 'DATA_LOSS')
+            # mkdir may have succeeded on a prior attempt whose fsync failed.
+            fsync_directory(path.parent)
         return path
 
     def _object(self, descriptor):
@@ -146,6 +148,11 @@ class ArtifactStore:
                 destination = self._object(descriptor)
                 if destination.exists():
                     self._check_files(descriptor)
+                    # A previous rename may have survived a failed durability barrier.
+                    for name in ('index.faiss', 'manifest.json'):
+                        with (destination/name).open('rb') as source: os.fsync(source.fileno())
+                    fsync_directory(destination)
+                    fsync_directory(parent)
                 else:
                     temporary = upload.path.with_suffix('.object')
                     temporary.mkdir()
@@ -178,7 +185,8 @@ class ArtifactStore:
         with self.lock: upload = self._uploads.get(operation)
         if upload is None: return
         with upload.lock:
-            if not upload.alive: return
+            with self.lock:
+                if self._uploads.get(operation) is not upload: return
             upload.alive = False
             upload.path.unlink(missing_ok=True)
             with self.lock:

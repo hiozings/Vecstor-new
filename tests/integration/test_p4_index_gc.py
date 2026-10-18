@@ -51,3 +51,23 @@ def test_prune_requires_operation_and_valid_retention(cluster):
                     pb.PruneIndexArtifactsRequest(database_id=cluster.dbid,keep_last=1,dry_run=False)):
         with pytest.raises(grpc.RpcError) as error:cluster.stubs['A'].PruneIndexArtifacts(request,timeout=5)
         assert error.value.code()==grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_dropped_table_retained_only_until_references_release(cluster):
+    first=publish(cluster)
+    descriptor=descriptor_from_proto(first.descriptor)
+    lease=cluster.backend.catalog.begin_read(cluster.dbid,'items',ttl=60)
+    cluster.clients['A'].execute('DROP TABLE items')
+    cluster.clients['A'].import_dataset('source.npz','items')
+    second=publish(cluster,operation='recreated')
+    assert first.descriptor.key.table_id != second.descriptor.key.table_id
+    assert descriptor.artifact_id in prune(cluster,execute=False).protected
+    store=cluster.backend.index_service.store
+    with store.pin(descriptor):
+        cluster.backend.catalog.end_read(cluster.dbid,lease['token'])
+        assert descriptor.artifact_id in prune(cluster,execute=False).protected
+    result=prune(cluster)
+    assert list(result.deleted)==[descriptor.artifact_id]
+    assert second.descriptor.artifact_id in result.protected
+    assert not store.prepared(descriptor)
+    assert prune(cluster)==result

@@ -94,10 +94,12 @@ def test_incomplete_or_bad_checksum_is_not_sealed(tmp_path, cpu_artifact):
     store.abort_upload(op)
 
 
-def test_recovery_reports_corrupt_without_publishing_orphans(tmp_path, cpu_artifact):
+@pytest.mark.parametrize('corruption',['payload','manifest'])
+def test_recovery_reports_corrupt_without_publishing_orphans(tmp_path, cpu_artifact,corruption):
     store = ArtifactStore(tmp_path)
     descriptor = install(store, cpu_artifact)
-    next(tmp_path.glob('objects/*/*/index.faiss')).write_bytes(b'broken')
+    if corruption=='payload':next(tmp_path.glob('objects/*/*/index.faiss')).write_bytes(b'broken')
+    else:next(tmp_path.glob('objects/*/*/manifest.json')).write_text('{}')
     recovered = ArtifactStore(tmp_path)
     assert recovered.recover([descriptor])['corrupt'] == [descriptor.artifact_id]
     assert not recovered.prepared(descriptor)
@@ -139,3 +141,47 @@ def test_rename_failure_releases_staging(tmp_path, cpu_artifact, monkeypatch):
         store.validate_and_install(op, cpu_artifact[0].snapshot_sha256, time.monotonic()+10, lambda:False)
     store.abort_upload(op)
     assert store.reserved_bytes == 0 and not store.prepared(cpu_artifact[0])
+
+
+@pytest.mark.parametrize('barrier', ['object_parent', 'ancestor'])
+def test_failed_directory_barrier_must_be_retried(tmp_path, cpu_artifact, monkeypatch, barrier):
+    from vecstor.storage import index_artifacts
+    store = ArtifactStore(tmp_path)
+    original = index_artifacts.fsync_directory
+    parent = tmp_path/'objects'/'test-database'
+    def fail(path):
+        if (barrier == 'object_parent' and path == parent and list(parent.glob('*/index.faiss'))) or (barrier == 'ancestor' and path == tmp_path/'objects' and parent.exists()):
+            raise OSError('persistent directory sync failure')
+        original(path)
+    monkeypatch.setattr(index_artifacts, 'fsync_directory', fail)
+    for name in ('first', 'retry'):
+        op = stage(store, cpu_artifact, ('test-database', name))
+        with pytest.raises(OSError, match='persistent directory'):
+            store.validate_and_install(op, cpu_artifact[0].snapshot_sha256, time.monotonic()+10, lambda:False)
+        assert not store.prepared(cpu_artifact[0])
+        store.abort_upload(op)
+    monkeypatch.setattr(index_artifacts, 'fsync_directory', original)
+    install(store, cpu_artifact, ('test-database', 'recovered'))
+    assert store.prepared(cpu_artifact[0]) and store.reserved_bytes == 0
+
+
+def test_abort_retries_failed_unlink_without_leaking_reservation(tmp_path, cpu_artifact, monkeypatch):
+    from pathlib import Path
+    store = ArtifactStore(tmp_path)
+    op = stage(store, cpu_artifact)
+    original = Path.unlink
+    def fail(path, *args, **kwargs):
+        if path.suffix == '.part':raise OSError('temporary unlink failure')
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'unlink', fail)
+    with pytest.raises(OSError):store.abort_upload(op)
+    assert store.reserved_bytes > 0
+    monkeypatch.setattr(Path, 'unlink', original)
+    store.abort_upload(op)
+    assert store.reserved_bytes == 0
+    assert not list(tmp_path.glob('staging/*/*/*.part'))
+    # A duplicate cleanup must not release a later upload's reservation.
+    store.abort_upload(op)
+    stage(store, cpu_artifact, op)
+    assert store.reserved_bytes > 0
+    store.abort_upload(op)
