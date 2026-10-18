@@ -8,7 +8,7 @@
 
 ```bash
 python benchmarks/p4/validate_artifact_quality.py \
-  --calibration-dir results/recall-calibration-20261014 \
+  --calibration-dir results/recall-calibration-20261014/10000-independent \
   --compute 127.0.0.1:50052 --database demo --table items \
   --device cpu --selectivity 1 --k 10 --path search-first \
   --output-dir results/p4-artifact-quality-cpu
@@ -36,3 +36,5 @@ python benchmarks/p4/index_lifecycle.py --output-dir results/p4-lifecycle-costs
 verifier峰值使用exec后`/proc/self/status`的VmHWM，同时保留原始ru_maxrss计数。实测表明小子进程的ru_maxrss可带入父进程exec前峰值；[getrusage手册](https://man7.org/linux/man-pages/man2/getrusage.2.html)也说明资源计数跨exec保留。原build-worker字段保留历史含义，不能把它与verifier的exec后VmHWM直接比较；内核RSS计数和采样都不是原生分配器硬限。
 
 整体设计与验收要求见[设计](../../docs/design/p4-index-publication.md)。
+
+2026-10-18正式结果及最终回归/故障矩阵见[P4验收记录](../../docs/validation/p4-indexes.md)。原始成本版本与后续审查修复版本分别记录，不把测量前的耗时当作最终修复后重测。

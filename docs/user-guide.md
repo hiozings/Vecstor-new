@@ -327,7 +327,7 @@ ANN 索引位于计算进程内存中。写入改变数据库 revision 后，后
 
 已有质量配置也可能因 revision 改变而失效，重建索引不会自动更新配置，需要重新验证和绑定。已经开始的向量查询持有原版本读租约，元数据与向量保持同一快照。
 
-结束使用时，在交互界面 `.quit`，再对计算服务和存储服务依次按 Ctrl-C。重启时使用第 3 节相同的 `--data-root`，重新 `.open` 选择库；已提交数据仍在，计算侧索引需要重建。不要在服务运行期间手工编辑 DuckDB 文件。备份可在停止服务后复制整个数据根目录；项目尚未提供在线备份命令。
+结束使用时，在交互界面 `.quit`，再对计算服务和存储服务依次按 Ctrl-C。重启时使用第 3 节相同的 `--data-root`，重新 `.open` 选择库；已提交数据仍在；默认local模式的计算索引需要重建，published模式可通过RPC重新加载已发布工件，无需训练。不要在服务运行期间手工编辑 DuckDB 文件。备份可在停止服务后复制整个数据根目录；项目尚未提供在线备份命令。
 
 写入响应丢失或超时时，留意界面的 operation_id，执行 `.status 实际操作ID`：COMMITTED 表示已提交，FAILED 表示失败，UNKNOWN 表示暂时无法确认。不要把 UNKNOWN 当作回滚后盲目重复 INSERT。
 
@@ -347,7 +347,7 @@ ANN 索引位于计算进程内存中。写入改变数据库 revision 后，后
 | INVALID_ARGUMENT / 质量预算冲突 | 检查 SQL、维度与参数；先 `.search reset` 清除手动低预算，再重新选模式、路径和配置 |
 | RESOURCE_EXHAUSTED | 检查是候选预算、索引预算还是扫描并发限制；按实际原因调整，必要时恢复精确模式或降低并发 |
 | DEADLINE_EXCEEDED | 缩小数据/查询范围，查看服务负载；写入须确认操作状态，不直接重发 |
-| 重启后没有索引 | 当前索引不持久化，重新 `.index build 表名` |
+| 重启后没有索引 | 默认local索引需重新 `.index build 表名`；published模式使用 `.index load 表名` 或启动预加载，详见[P4索引说明](p4-indexes.md) |
 
 ## 13. 管理员：验证存算隔离
 
@@ -381,3 +381,9 @@ SETTINGS device='gpu', mode='approx', path='search-first';
 SETTINGS 仅覆盖当前语句，改为device='cpu'可切换CPU。GPU不能用于exact或filter-first。默认GPU不可用时明确失败；需允许转CPU才增加 `device_fallback='cpu'`，然后核对结果的实际设备/模式。候选上限2048可能使低通过率查询失败；CPU v1质量配置不能当作GPU证据。完整参数、索引重建、显存和隔离限制见 [GPU使用说明](gpu-search.md)。
 
 GPU改进版自动复用终端会话的查询能力信息；普通SQL和CRUD仍按原语义执行。可选的候选合并读取需启动计算服务时加 `--fused-candidates`，再用向量SQL的 `SETTINGS candidate_data_path='fused'|'separate'` 对照。默认关闭，部分负载会退化；具体配置和计划字段见 [热会话与候选合并读取](gpu-search.md#热会话与候选合并读取g1g2)。
+
+## P4 权威工件与双节点恢复
+
+需要重启后零训练加载或两个计算节点使用相同索引时，计算服务显式设置 `--index-source published`。数据导入后由一个节点 `.index publish 表名 --operation-id 唯一ID`，各节点分别 `.index load 表名`，用 `.index inspect 表名` 核对相同artifact_id与generation。发布成功不等于各节点已加载；写入后须重新完整构建发布，新版本缺索引时明确精确回退或失败。
+
+GPU通过 `.index load 表名 --device gpu` 从同一CPU工件克隆。存储回收使用 `.index prune --keep-last 2` 预览，再加 `--execute --operation-id 唯一ID` 执行；`.index clear`仍只清内存。操作状态、启动预加载、预算、故障与质量配置v3的完整说明见[P4索引说明](p4-indexes.md)，验证范围见[验收记录](validation/p4-indexes.md)。

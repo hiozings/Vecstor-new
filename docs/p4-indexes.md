@@ -1,6 +1,6 @@
 # P4 持久索引与版本发布
 
-状态：功能已接入，正式规模与完整故障验收仍在T9进行。设计见[索引发布设计](design/p4-index-publication.md)，实施记录见[计划](superpowers/plans/2026-10-16-p4-index-publication.md)。数据缓存、自适应策略和增量维护不属于本索引子阶段。
+状态：索引子阶段T1—T9已完成，双节点、重启、真实GPU、故障与规模证据见[验收记录](validation/p4-indexes.md)。设计见[索引发布设计](design/p4-index-publication.md)，实施记录见[计划](superpowers/plans/2026-10-16-p4-index-publication.md)。数据缓存、自适应策略和增量维护不属于本索引子阶段。
 
 ## 两个计算节点
 

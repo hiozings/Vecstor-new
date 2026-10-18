@@ -136,6 +136,6 @@ SETTINGS device='gpu', mode='approx', path='search-first';
 
 G0—G2已补强GPU候选完整性和响应校验，减少热会话能力查询，并新增可选 `--fused-candidates` 合并读取及SQL `candidate_data_path` 覆盖。默认关闭合并读取；运行时合批尚未上线。使用方法见 [GPU说明](docs/gpu-search.md)，性能与局限见 [改进验收](docs/validation/gpu-improvements.md)。
 
-## P4 持久索引（验收进行中）
+## P4 持久索引
 
-新增显式`--index-source published`，通过`.index publish`向存储发布权威CPU工件，两个计算节点分别`.index load`并按读租约绑定同一工件。支持GPU重克隆、显式启动预加载和受引用保护的回收；默认local/精确查询保持兼容。操作流程和边界见[P4索引使用说明](docs/p4-indexes.md)。T9正式验收仍在进行，不代表全部P4完成。
+新增显式`--index-source published`，通过`.index publish`向存储发布权威CPU工件，两个计算节点分别`.index load`并按读租约绑定同一工件。支持GPU重克隆、显式启动预加载和受引用保护的回收；默认local/精确查询保持兼容。操作流程和边界见[P4索引使用说明](docs/p4-indexes.md)。索引子阶段T1—T9及正式验收已完成，见[验收记录](docs/validation/p4-indexes.md)：687项完整真实GPU回归与4项补充进程测试通过，另有1万/10万双节点、12组生命周期成本和CPU/GPU各500留出验证。数据缓存、自适应策略与增量维护仍待推进，不代表全部P4完成。

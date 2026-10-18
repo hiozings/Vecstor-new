@@ -1,6 +1,6 @@
 # P4 索引持久化、版本发布与恢复设计
 
-日期：2026-10-16。状态：**实施中，T1—T6已完成，完整验收尚未完成**。初始规划范围由用户指定：结合现有代码制定详细设计与实施计划，包含双计算节点一致性和重启恢复；规划轮次暂不修改业务代码；2026-10-17起按用户授权实施。实施入口见 [执行计划](../superpowers/plans/2026-10-16-p4-index-publication.md)。
+日期：2026-10-16。状态：**索引子阶段T1—T9已完成，2026-10-18验收记录见[验证文档](../validation/p4-indexes.md)**。初始规划范围由用户指定：结合现有代码制定详细设计与实施计划，包含双计算节点一致性和重启恢复；规划轮次暂不修改业务代码；2026-10-17起按用户授权实施。实施入口见 [执行计划](../superpowers/plans/2026-10-16-p4-index-publication.md)。
 
 ## 1. 目标、范围与选择
 
@@ -314,7 +314,7 @@ publish 从新租约取得 expected_generation；API 使用者可显式指定，
 
 恢复模式测试要将训练入口替换为必失败桩，或在测试服务中记录并断言 build worker 启动数为 0；同时断言 StreamVectorSnapshot 调用为 0、DownloadIndexArtifact 字节大于 0。仅观察“查询成功/速度很快”不足以证明没有重新训练。
 
-产物包括 `config.json`、`environment.json`、`source-sha256.json`、`events.jsonl`（进程内单调时间及身份）、`cases.jsonl`（SQL/向量/真值/结果/计划）、`artifacts.json`（不含私有绝对路径）、`recovery.json`、`faults.json`、`isolation.json`、服务日志、`report.json`。报告按 A01—A20 记录 PASS/FAIL/SKIP，不把未运行 GPU 写成通过。
+实际产物包括 `config.json`、`environment.json`、`source-sha256.json`、`events.jsonl`（进程内单调时间及身份）、`cases.jsonl`（查询/结果/计划）、`isolation.json`、服务日志和 `report.json`；工件、恢复、回收身份统一放在report，不另复制artifacts/recovery文件。故障证据来自确定性pytest/JUnit；最终 `acceptance-matrix.json` 汇总A01—A20的真实脚本与测试证据，不把脚本未运行的故障或GPU项写成通过。
 
 成本报告至少包含构建/发布/下载/恢复/克隆时间、索引滞后窗口、各节点就绪时间、RPC Protobuf 字节、磁盘工件和 staging 峰值、compute/storage/build/verifier/GPU worker RSS、显存采样、回退比例和结果不足比例。定义 `lag_to_publish=t_publish_commit-t_data_commit`，`lag_to_ready=max(t_A_ready,t_B_ready)-t_data_commit`；并发数据写入时按 revision 分别计算，不混合事件。
 

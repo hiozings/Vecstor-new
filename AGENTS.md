@@ -11,7 +11,7 @@
 - 依据：`README.md` 与 `项目申报书2.pdf`。
 - 申报实施周期：2026-01-01 至 2026-12-31。
 - 预期成果：一套可运行的混合查询存算分离向量数据引擎原型，以及包含架构设计、优化方案和性能测试的结题报告。
-- 已建立 Conda `vecstor` 环境；P1 本地基线、P2 gRPC 服务和 P2.5 交互式 SQL、运行时选库、持久 CRUD 已实现。P2.5 通过真实终端、P1 对照、重启及 Landlock 验收；P3 CPU ANN、双路径、候选扩展和计划展示已实现，通过 427 项回归、1 万行真实终端/Landlock 及 360 次规模实验。GPU ANN search-first 已接入，索引在线维护与P4数据缓存优化仍待实现。
+- 已建立 Conda `vecstor` 环境；P1 本地基线、P2 gRPC 服务和 P2.5 交互式 SQL、运行时选库、持久 CRUD 已实现。P2.5 通过真实终端、P1 对照、重启及 Landlock 验收；P3 CPU ANN、双路径、候选扩展和计划展示已实现，通过 427 项回归、1 万行真实终端/Landlock 及 360 次规模实验。GPU ANN search-first 已接入，P4权威索引持久发布、双节点加载及重启恢复已完成，增量维护与数据缓存优化仍待实现。
 - 以下排期按 2026-10-10 起剩余约 12 周制定。若存在其他位置的代码或学校提前验收，应先核实再更新排期。
 
 ## 2. 目标与范围
@@ -57,12 +57,12 @@
 | --- | --- | --- |
 | Python / Conda | 服务编排、查询调度、实验脚本 | Python 3.12.15；复用本机 Conda，独立环境 `vecstor` |
 | DuckDB / SQLGlot | SQL 执行、语法树解析 | DuckDB 1.5.6、SQLGlot 30.21.0；持久 CRUD、受控单表 SQL、向量查询及 MVCC 读租约已实现 |
-| Faiss CPU/GPU | 向量检索、索引保存与加载 | `faiss-gpu` 1.12.0 同时支持 CPU/GPU；组件级 Flat、IVFFlat 与持久化验证通过；P3 业务接入 CPU IVFFlat 及显式GPU search-first副本；CPU训练/float64重排，业务索引持久化未实现 |
+| Faiss CPU/GPU | 向量检索、索引保存与加载 | `faiss-gpu` 1.12.0 同时支持 CPU/GPU；组件级 Flat、IVFFlat 与持久化验证通过；P3 业务接入 CPU IVFFlat 及显式GPU search-first副本；CPU训练/float64重排；P4已实现CPU权威工件、RPC发布/加载与GPU同源恢复 |
 | CUDA / NumPy | GPU 运行库与精确计算 | CUDA 12.4 运行库、NumPy 1.26.4；P1 使用 CPU NumPy float64 穷举距离，GPU仅ANN检索，精确计算/重排保留CPU |
-| gRPC / Protobuf | 查询、目录、类型化 SQL 结果与读租约 | grpcio/grpcio-tools 1.83.1、protobuf 7.35.1；兼容 P2 v1 并新增 P2.5 v2；索引分发待实现 |
+| gRPC / Protobuf | 查询、目录、类型化 SQL 结果与读租约 | grpcio/grpcio-tools 1.83.1、protobuf 7.35.1；兼容 P2 v1 并新增 P2.5 v2；P4已接入类型化工件发布/分发与能力确认 |
 | prompt_toolkit / Rich | 多行终端、历史/补全与表格 | 3.0.53 / 15.0.0，已通过 Conda 安装并锁定 |
 | Arrow Flight | 批量列式数据传输 | 可选，只有测出传输瓶颈后再评估 |
-| pytest | 正确性、接口与集成测试 | 9.1.1；565 项 P1/P2/P2.5/P3/质量优化/GPU与G0—G2测试通过，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
+| pytest | 正确性、接口与集成测试 | 9.1.1；最终687项完整回归及4项补充进程验收通过（零跳过），覆盖P1/P2/P2.5/P3/质量/GPU/P4索引，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
 | 容器与部署脚本 | 隔离部署、复现实验 | 随原型补充，不先引入复杂集群平台 |
 
 安装状态与业务集成状态必须分开记录。通过 Conda 管理依赖，不混用 uv/pip 覆盖 Conda 管理的 Faiss、NumPy 和 CUDA 库。`environment.yml` 固定直接依赖，`environments/vecstor-linux-64.explicit.txt` 固定全部 Conda 包的构建和 MD5。保留 CPU 后端，GPU 计算使用本机已有设备。
@@ -109,15 +109,15 @@ P1、P2 与 P2.5 技术交付已完成。旧 P2 只读快照模式保留，P2.5 
 
 P2.5 提前完成了 P4 的部分写入一致性基础，但不代表 ANN 索引更新或优化已实现。设计见 [交互式 SQL 终端](docs/design/interactive-sql-shell.md)，执行记录见 [实施计划](docs/superpowers/plans/2026-10-12-interactive-sql-shell.md)。P3 已复用数据库 revision 和读租约。
 
-P3 CPU 实现见 [使用说明](docs/p3-search.md)、[Faiss 执行设计](docs/design/p3-faiss-execution.md) 和 [六任务实施记录](docs/superpowers/plans/2026-10-13-p3-faiss.md)。保留默认精确模式，显式开启 CPU IVF 的 filter-first/search-first；按快照版本复用索引，候选不足可精确回退，并提供 EXPLAIN/ANALYZE 与实际执行统计。数据库级 revision 保持不变，其他表写入也保守失效。该P3验收时GPU尚未接入；权威索引持久化/分发、批量维护和自适应策略仍未实现。360 次实验包含 120 次默认精确、168 次真正 ANN、72 次精确回退；默认参数未达到普遍 Recall@10≥0.95，见 [实测召回与资源记录](docs/validation/p3-faiss.md)。
+P3 CPU 实现见 [使用说明](docs/p3-search.md)、[Faiss 执行设计](docs/design/p3-faiss-execution.md) 和 [六任务实施记录](docs/superpowers/plans/2026-10-13-p3-faiss.md)。保留默认精确模式，显式开启 CPU IVF 的 filter-first/search-first；按快照版本复用索引，候选不足可精确回退，并提供 EXPLAIN/ANALYZE 与实际执行统计。数据库级 revision 保持不变，其他表写入也保守失效。该P3验收时GPU尚未接入；当时未实现权威索引持久化/分发；当前P4索引子阶段已完成，增量维护和自适应策略仍待推进。360 次实验包含 120 次默认精确、168 次真正 ANN、72 次精确回退；默认参数未达到普遍 Recall@10≥0.95，见 [实测召回与资源记录](docs/validation/p3-faiss.md)。
 
 ANN 质量优化四阶段已完成：显式快照绑定配置、质量预算下限、查询内选择器复用及候选批量绑定/租约计划缓存。60 组各 500 个独立留出查询，最低平均 Recall@10=0.9702，零精确回退；最终 720 次隔离 RPC 对照及 96 组成本消融通过。默认 exact 与未选择配置时的 ANN 参数保持不变；不是任意数据或逐查询召回保证。见 [最终验收与成本](docs/validation/ann-recall-optimization.md) 和 [实施计划](docs/superpowers/plans/2026-10-13-ann-recall-optimization.md)。
 
 GPU ANN 已按计划接入：SQL SETTINGS逐请求选择CPU/GPU、显式GPU副本、独立worker/预算/设备回退，首期仅GPU search-first。真实GPU校准60组：36通过、21不支持、3留出完整性失败；失败组不导出质量配置，不承诺所有负载纯GPU达标。CPU训练、精确基线和float64重排保持不变。实现与限制见 [GPU说明](docs/gpu-search.md)、[验收记录](docs/validation/gpu-ann.md) 和 [实施计划](docs/superpowers/plans/2026-10-15-gpu-ann.md)。
 
-GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复用查询能力并拆分计时，提供可选候选过滤/向量合并RPC（默认关闭、SQL可覆盖）。原生batch1/4/8探测完成；native占比低且GPU排队短，本轮不部署运行时批调度、批内取消或二进制IPC。自动策略/持久版本/GPU覆盖扩展仍分别留给G3—G5/P4。见 [改进验收](docs/validation/gpu-improvements.md)、[问题分析](docs/design/gpu-improvement-analysis.md) 和 [执行计划](docs/superpowers/plans/2026-10-15-gpu-improvements.md)。
+GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复用查询能力并拆分计时，提供可选候选过滤/向量合并RPC（默认关闭、SQL可覆盖）。原生batch1/4/8探测完成；native占比低且GPU排队短，本轮不部署运行时批调度、批内取消或二进制IPC。自动策略/GPU覆盖扩展仍留给G3—G5；持久版本已由P4索引子阶段接入。见 [改进验收](docs/validation/gpu-improvements.md)、[问题分析](docs/design/gpu-improvement-analysis.md) 和 [执行计划](docs/superpowers/plans/2026-10-15-gpu-improvements.md)。
 
-P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publication.md)和[九任务实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)，2026-10-17开始实施：T1已增加原生CPU工件格式、完整身份及规范ID/向量摘要校验，52项工件/Faiss定向测试通过；T2已增加目录事务/CAS/读租约绑定并通过35项定向测试；T3已实现工件文件/容量预留/独立校验并通过34项定向测试；T4已接入存储发布/分发RPC，阶段完整真实GPU回归623通过；T5计算侧显式发布/零训练加载与工件引用已完成并通过41项定向测试；T6双节点published执行绑定与完成帧确认已通过30项定向测试；T7 GPU工件恢复/v3质量绑定已通过47项后端回归和6项工具边界检查，正式500留出证据留T9；T8恢复/GC/预加载/终端已接入，阶段完整真实GPU回归664通过，后补边界39项及实际崩溃/墓碑6项通过；T9正式规模、成本与质量验收继续。拟采用计算侧显式构建、存储侧校验/持久发布、读租约绑定权威工件、双计算节点显式加载与零训练重启恢复；包含批量写入后的完整重建发布、故障注入、旧版本回收、GPU重克隆及质量工件绑定。保留数据库级revision；数据缓存、自适应策略、表级版本和增量维护另行推进。已接入命令见[索引使用说明](docs/p4-indexes.md)；正式验收脚本与完整交付尚在T9，不代表全部P4完成。
+P4索引子阶段T1—T9已于2026-10-18完成：[设计](docs/design/p4-index-publication.md)、[实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)、[使用说明](docs/p4-indexes.md)、[验收记录](docs/validation/p4-indexes.md)。计算侧显式构建，存储校验/落盘/目录原子发布，读租约绑定权威工件，双计算节点RPC加载；支持批量写入后完整重建、零训练重启、GPU重克隆、v3工件质量绑定及引用保护GC。最终不设置PYTHONPATH的真实GPU完整回归687通过，另补4项进程验收通过；1万/10万规模、12组生命周期成本和CPU/GPU各500条冻结留出验证通过。审查补齐目录同步重试、DROP表回收与上传清理重试。保持数据库级revision；数据缓存、自适应策略、表级版本与增量维护尚未实现，不代表全部P4完成。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -183,7 +183,7 @@ P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publi
 │   ├── calibrate.py      # 独立校准/留出、带簇负载、冻结配置与恢复运行
 │   └── validate_quality.py # 冻结参数 RPC 对照及实际快照绑定
 ├── benchmarks/gpu/       # calibrate/run质量校准与RPC；sessions热会话/合并RPC对照；batch_probe原生批探测
-├── benchmarks/p4/        # 已发布工件v3质量验证与生命周期/并发/资源成本，正式证据在T9
+├── benchmarks/p4/        # 已发布工件v3质量验证与生命周期/并发/资源成本，正式成本与质量证据已归档
 ├── configs/quality/       # 质量配置示例，绑定实际快照而非通用默认参数
 ├── tests/
 │   ├── unit/             # 数据、SQL、持久事务、协议、终端输入与 PTY 测试
@@ -200,7 +200,7 @@ P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publi
 │   ├── design/p2-grpc.md  # P2 协议、快照与隔离设计
 │   ├── design/interactive-sql-shell.md # P2.5 终端与可写数据库设计
 │   ├── design/p3-faiss-execution.md # P3 索引、两路径与计划展示设计
-│   ├── design/p4-index-publication.md # P4索引工件/发布/双节点/恢复设计与实施边界（实施中）
+│   ├── design/p4-index-publication.md # P4索引工件/发布/双节点/恢复设计与实施边界（索引子阶段完成）
 │   ├── design/gpu-improvement-analysis.md # GPU不足、补充探测与改进优先级
 │   ├── design/gpu-ann-execution.md # GPU ANN 与 SQL 设备选择设计
 │   ├── design/ann-recall-optimization.md # 低召回原因、校准证据和成本评估
@@ -211,13 +211,14 @@ P4索引子阶段已于2026-10-16形成[设计提案](docs/design/p4-index-publi
 │   ├── validation/gpu-ann-capabilities.md # GPU原生能力边界
 │   ├── validation/gpu-ann.md # GPU质量/隔离/成本/限制
 │   ├── validation/gpu-improvements.md # G0—G2边界/热会话/合并RPC/原生批验证
+│   ├── validation/p4-indexes.md # 双节点/重启/故障矩阵、成本及工件质量证据
 │   ├── validation/p3-faiss.md # P3 CPU 回归、隔离、召回实验与已知限制
 │   ├── superpowers/plans/2026-10-11-local-baseline.md # 执行计划与记录
 │   ├── superpowers/plans/2026-10-12-p2-grpc.md # P2 执行记录
 │   ├── superpowers/plans/2026-10-12-interactive-sql-shell.md # P2.5 执行计划与完成记录
 │   ├── superpowers/plans/2026-10-13-p3-faiss.md # P3 六任务实施计划
 │   ├── superpowers/plans/2026-10-15-gpu-improvements.md # GPU G0—G2实施记录与G3—G5待办
-│   ├── superpowers/plans/2026-10-16-p4-index-publication.md # P4索引子阶段九任务计划与验收矩阵（实施中）
+│   ├── superpowers/plans/2026-10-16-p4-index-publication.md # P4索引子阶段九任务计划与验收矩阵（已完成）
 │   ├── superpowers/plans/2026-10-15-gpu-ann.md # GPU 六阶段实施记录
 │   ├── superpowers/plans/2026-10-13-ann-recall-optimization.md # 质量校准、配置与优化实施记录
 │   └── research/
@@ -239,7 +240,7 @@ src/vecstor/
 
 不要为满足目录树而创建空模块。新增、移动、删除目录或改变职责时，在同一次改动中更新本节；已实现目录移入“当前项目文件”，未实现内容保留为规划。
 
-后续扩展 index/ 的持久化与批量维护，在 storage 中增加权威索引发布/分发，扩展 benchmarks/ 的并发与消融实验。参考资料入口：[相关 GitHub 仓库与复用建议](docs/research/github-reference-survey.md)。该调研为技术评估，不表示已集成所有上游组件。
+index/与storage/已支持权威索引持久发布与完整重建；后续推进数据缓存、自适应策略和更广泛并发/消融实验。参考资料入口：[相关 GitHub 仓库与复用建议](docs/research/github-reference-survey.md)。该调研为技术评估，不表示已集成所有上游组件。
 
 ## 7. 开发约束
 
@@ -268,7 +269,7 @@ src/vecstor/
 - 网络调用设置超时；读请求重试有界；写请求重试必须有幂等语义。
 - 服务不可达、索引损坏、版本不匹配应返回明确错误或执行有记录的恢复流程，不能静默返回不完整结果。
 - 将批量更新的可见性延迟写入文档，不将其描述为实时强一致更新。
-- P2 的 `--dataset` 仍只在启动时读取 NPZ。P2.5 的 `--data-root` 支持单语句事务写入和持久 revision，读租约最长 60 秒、每库至多 16 个；P3 派生内存索引严格匹配数据库 revision，持久版本发布与批量维护待 P4。
+- P2 的 `--dataset` 仍只在启动时读取 NPZ。P2.5 的 `--data-root` 支持单语句事务写入和持久 revision，读租约最长 60 秒、每库至多 16 个；P3 派生内存索引严格匹配数据库 revision，P4已实现持久版本发布与批量写入后的完整重建，增量维护仍未实现。
 - 每条请求携带 database_id，禁止全局 current_database。失败选库保留原客户端选择，计算侧不得直接读 DuckDB 文件。
 - 写操作数据、revision、成功结果在同事务提交；失败回滚后持久记录失败摘要。同一 operation_id 不得绑定不同请求。响应丢失须查询状态，UNKNOWN 不能当作回滚或成功；导入重试必须先查幂等记录，不依赖源文件仍存在。
 - 每库专用 SQL 队列；超时/取消须中断正确活动连接并在分批读取时检查期限，不能只取消已运行 Future。避免中断串行队列中后续的其他请求。

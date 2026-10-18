@@ -1,6 +1,6 @@
 # P4 索引持久化与版本发布实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. 执行方式由用户在实施前选择；本次仅编写设计与计划，不启动实现或子代理。
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking. 执行方式由用户在实施前选择；初始规划轮仅编写设计与计划；2026-10-17起按用户授权逐任务实施。
 
 **Goal:** 交付存储侧权威 CPU 索引工件、原子版本发布、双计算节点显式加载与重启恢复，并用真实 RPC/PTY/隔离及故障注入证明一致性。
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** 现有 Conda Python 3.12.15、DuckDB 1.5.6、Faiss 1.12.0、NumPy 1.26.4、gRPC 1.83.1、Protobuf 7.35.1、pytest；不新增依赖。
 
-**Spec:** [P4 设计提案](../../design/p4-index-publication.md)。状态：2026-10-16 已形成提案，初始文档尚未实施；当前T1—T6已完成，T7—T9继续，完整验收尚未完成。用户要求本轮不修改业务代码，不将本计划视为实施或 Git 操作授权。
+**Spec:** [P4 设计提案](../../design/p4-index-publication.md)。状态：2026-10-16 已形成提案，初始文档尚未实施；当前T1—T9索引子阶段已完成，正式规模/成本/质量、独立审查及最终回归见[验收记录](../../validation/p4-indexes.md)。Git检查、建功能分支和分阶段提交已获得用户授权，不合并或推送。
 
 ## 全局约束
 
@@ -239,20 +239,20 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 
 **Interfaces:**
 
-- `run_acceptance(output_dir: Path, rows=10000, dimension=128, seed=20261016, require_gpu=False) -> dict`：输出A01—A20矩阵；失败同样落报告；output必须不存在。
+- `run_acceptance(output_dir: Path, rows=10000, dimension=128, seed=20261016, require_gpu=False) -> dict`：输出实际执行的生命周期判据；A01—A20矩阵结合最终JUnit汇总；失败同样落报告；output必须不存在。
 - `run_lifecycle_benchmark(output_dir: Path, sizes=(10000,100000), repeats=3, concurrency=(1,4,8)) -> dict`：构建/发布/加载/恢复分开计时，复用固定工件与查询，不混入参数调优。
 - 测试专用故障注入模块放在 `tests/`，通过受控子进程与Event/pipe建立commit前后barrier；生产脚本不支持网络触发任意kill点。
 
-- [ ] 先写小规模验收工具测试，校验output防覆盖、每场景有判据、失败报告与进程回收；写COMMIT前后kill的确定性集成测试，观察失败。
-- [ ] 实现A01—A20矩阵，至少一次由真实PTY执行publish/status/load；A/B进程独立，存储唯一。使用明确屏障固定旧查询和发布时序，不靠sleep碰运气。
-- [ ] 实现恢复反训练验证：测试进程训练入口必失败，计数 `build_worker_started=0` / `snapshot_calls=0` / `artifact_download_bytes>0`；分别覆盖A单重启、A/B重启、存储及全部进程重启。
-- [ ] 实现对象落盘后commit前、commit后响应前、GC标记后删除前的kill检查；断言原子发布与幂等状态，不把文件目录存在当发布成功。
-- [ ] 运行 `conda run -n vecstor python -m pytest -q tests/integration/test_p4_index_acceptance.py tests/integration/test_p4_index_crashes.py`，通过后按设计9执行1万、10万和真实GPU验收，各使用新输出目录。
-- [ ] 运行生命周期成本工具，保存三次重复和资源/时间定义；运行T7的至少一组CPU、一个已支持GPU负载的完整500留出工件验证。将支持范围与原全矩阵分开，不宣称所有负载重验。
-- [ ] 运行完整业务回归：`OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECSTOR_REQUIRE_GPU=1 conda run --no-capture-output -n vecstor python -m pytest -q`。真实GPU/localhost受沙箱限制时按项目约定请求沙箱外运行；CPU-only skip不能计GPU通过。
-- [ ] 独立审查重点为本计划5项风险及A01—A20覆盖；按执行方式调用审查技能，修复须补失败回归。审查后按变更范围重验，性能测量与最终源码不同则保留版本区别。
-- [ ] 写验证文档真实结果，列出尚未通过的矩阵；同步目录、恢复/发布命令和限制。保留原始证据包及源码SHA，不向Git提交大型结果/用户数据。
-- [ ] 授权时提交 `test: validate published index lifecycle across two compute nodes`；是否合并/推送另按用户授权办理。
+- [x] 先写小规模验收工具测试，校验output防覆盖、每场景有判据、失败报告与进程回收；写COMMIT前后kill的确定性集成测试，观察失败。
+- [x] 实现A01—A20矩阵，至少一次由真实PTY执行publish/status/load；A/B进程独立，存储唯一。使用明确屏障固定旧查询和发布时序，不靠sleep碰运气。
+- [x] 实现恢复反训练验证：测试进程训练入口必失败，训练入口禁止调用，实际统计 `trained=false` / `snapshot_calls=0` / `artifact_download_bytes>0`；分别覆盖A单重启、A/B重启、存储及全部进程重启。
+- [x] 实现对象落盘后commit前、commit后响应前、GC标记后删除前的kill检查；断言原子发布与幂等状态，不把文件目录存在当发布成功。
+- [x] 运行 `conda run -n vecstor python -m pytest -q tests/integration/test_p4_index_acceptance.py tests/integration/test_p4_index_crashes.py`，通过后按设计9执行1万、10万和真实GPU验收，各使用新输出目录。
+- [x] 运行生命周期成本工具，保存三次重复和资源/时间定义；运行T7的至少一组CPU、一个已支持GPU负载的完整500留出工件验证。将支持范围与原全矩阵分开，不宣称所有负载重验。
+- [x] 运行完整业务回归：`OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECSTOR_REQUIRE_GPU=1 conda run --no-capture-output -n vecstor python -m pytest -q`。真实GPU/localhost受沙箱限制时按项目约定请求沙箱外运行；CPU-only skip不能计GPU通过。
+- [x] 独立审查重点为本计划5项风险及A01—A20覆盖；按执行方式调用审查技能，修复须补失败回归。审查后按变更范围重验，性能测量与最终源码不同则保留版本区别。
+- [x] 写验证文档真实结果，列出尚未通过的矩阵；同步目录、恢复/发布命令和限制。保留原始证据包及源码SHA，不向Git提交大型结果/用户数据。
+- [x] 授权时提交 `test: validate published index lifecycle across two compute nodes`；是否合并/推送另按用户授权办理。
 
 ## 里程碑与停线条件
 
@@ -301,3 +301,7 @@ def test_same_revision_head_switch_ignores_local_active(cluster):
 - T7 GPU工件来源与v3质量配置完成；47项后端/质量/旧GPU测试通过（35.96秒），6项验证工具/工件质量边界测试通过（1.55秒）。完整500留出正式证据按计划留至T9，不将负面工具测试当作正式质量通过。
 
 - T8存储恢复、受保护GC、显式预加载、CLI/PTY及工件隔离探针完成。阶段完整真实GPU回归664通过（246.38秒），随后修复GPU预算错误码与预加载名称归一化；39项定向通过（24.80秒），实际进程崩溃窗口/GC恢复及不同字节墓碑保护6项通过（5.76秒）。T9继续正式规模、成本、质量与整体审查。
+
+- T9完成：1万36项、10万36项、GPU38项生命周期判据通过；12组成本/624条计时查询通过；CPU/GPU各500条完整留出平均Recall0.9702/0.9728，导出v3并重启应用。首次100k导入15秒超时失败保留，显式管理超时修复后新目录通过；索引租约仍60秒。
+- 独立最终审查提出两项Important，目录屏障重试与DROP表保留策略均复现修复；另修复unlink清理重试容量泄漏，32项相关回归通过。最终完整真实GPU且无PYTHONPATH回归687通过（277.35秒），随后仅补4项进程验收通过（8.05秒），业务源码未改；协议重复生成一致。A01—A20实际证据索引已核对，完整限制见验证文档。
+- 成本/质量版本f3a00c9，最终业务修复版本a9720c5，额外fsync可能影响计时，不称最终源码性能重测。按已授权选择保留功能分支，未合并/推送。
