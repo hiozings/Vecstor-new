@@ -1,5 +1,7 @@
 import json
 import grpc
+import os
+import signal
 import pytest
 
 from vecstor.rpc import sql_pb2 as pb
@@ -25,7 +27,9 @@ def test_dead_worker_reload_preserves_published_cpu(cluster, monkeypatch):
     publication = publish(cluster); load(cluster, device='gpu')
     worker = cluster.engines['A'].index_manager.gpu_worker
     generation = worker.generation
-    worker.reset()
+    process=worker._process
+    os.kill(process.pid,signal.SIGKILL)
+    process.wait(timeout=5)
     from vecstor.compute import index_manager
     monkeypatch.setattr(index_manager, 'build_in_worker', lambda *a, **k:pytest.fail('worker recovery must not train'))
     restored = load(cluster, device='gpu')

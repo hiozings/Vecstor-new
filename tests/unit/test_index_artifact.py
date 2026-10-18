@@ -91,6 +91,18 @@ def test_valid_ids_wrong_vectors_rejected(source):
         encode_artifact(wrong, descriptor.key, descriptor.build_config, descriptor.snapshot_sha256)
 
 
+def test_valid_native_payload_with_forged_snapshot_digest_rejected(source):
+    ids,vectors,_,descriptor,_=source
+    changed=vectors+np.float32(1)
+    hasher=SnapshotHasher(len(ids),changed.shape[1]);hasher.add(ids,changed)
+    wrong=FaissIndex.build(ids,changed,descriptor.build_config)
+    forged,payload=encode_artifact(wrong,descriptor.key,descriptor.build_config,hasher.finish())
+    forged=replace(forged,snapshot_sha256=descriptor.snapshot_sha256)
+    forged=replace(forged,artifact_id=forged.identity())
+    with pytest.raises(ArtifactError,match='snapshot'):
+        validate_artifact(payload,forged)
+
+
 @pytest.mark.parametrize('field,value', [('format_version', 2), ('faiss_version', '0.0'),
                                         ('platform', 'other'), ('payload_size', True), ('row_count', -1)])
 def test_unknown_format_or_faiss_version_rejected(source, field, value):

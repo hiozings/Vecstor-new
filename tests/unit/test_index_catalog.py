@@ -158,3 +158,27 @@ def test_deleted_key_tombstone_rejects_different_native_bytes(catalog):
     with pytest.raises(ArtifactError,match='index_key_content_conflict'):
         commit(catalog,'changed',lease,changed)
     assert db.call('begin_read','items',60,True)['published_index_state']=='missing'
+
+
+def test_stale_head_generation_cannot_overwrite_new_publication(catalog):
+    cat,db,data,store=catalog
+    old=db.call('begin_read','items',60,True)
+    lease,first,_=prepare(catalog);commit(catalog,'publish1',lease,first)
+    config=BuildConfig(nlist=2)
+    intent=dict(database_id=db.id,table='items',nlist=2,seed=config.seed,expected_generation=0,protocol_version=1)
+    record=db.call('begin_index_publication',old['token'],'stale',config,0,intent)
+    handle=FaissIndex.build(data.ids,data.vectors,config)
+    descriptor,_=encode_artifact(handle,record.key,config,first.snapshot_sha256)
+    db.call('record_snapshot_digest',old['token'],first.snapshot_sha256,data.size)
+    db.call('bind_index_upload','stale',descriptor)
+    db.call('index_phase','stale','STAGED');db.call('index_phase','stale','VALIDATING')
+    store.objects[descriptor.artifact_id]=descriptor
+    with pytest.raises(ArtifactError,match='index_head_changed'):commit(catalog,'stale',old,descriptor)
+    assert db.call('begin_read','items',60,True)['published_index']['artifact_id']==first.artifact_id
+
+
+def test_second_publication_rejected_without_poisoning_first(catalog):
+    lease,descriptor,record=prepare(catalog)
+    with pytest.raises(ArtifactError,match='publication_busy'):
+        catalog[1].call('begin_index_publication',lease['token'],'other',descriptor.build_config,0,record.request_intent)
+    assert commit(catalog,'publish1',lease,descriptor).state=='COMMITTED'

@@ -33,4 +33,6 @@ python benchmarks/p4/index_lifecycle.py --output-dir results/p4-lifecycle-costs
 
 每5ms采样各进程RSS/CPU和索引文件占用；GPU成本运行可加`--require-gpu`，此时整卡显存包含其他程序且采样可能漏峰。build/verifier峰值来自其子进程自报，独立记录；不同进程峰值不能相加当同步峰值。storage_verify_ms为验证子进程main阶段，storage_install_ms包含落盘/fsync/rename，finalize_rpc_ms还包含RPC、启动和目录提交；未独立测量的storage_catalog_commit_ms为null。所有传输字节为Protobuf/工件逻辑字节，非网卡流量。
 
+verifier峰值使用exec后`/proc/self/status`的VmHWM，同时保留原始ru_maxrss计数。实测表明小子进程的ru_maxrss可带入父进程exec前峰值；[getrusage手册](https://man7.org/linux/man-pages/man2/getrusage.2.html)也说明资源计数跨exec保留。原build-worker字段保留历史含义，不能把它与verifier的exec后VmHWM直接比较；内核RSS计数和采样都不是原生分配器硬限。
+
 整体设计与验收要求见[设计](../../docs/design/p4-index-publication.md)。

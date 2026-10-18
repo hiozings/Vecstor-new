@@ -31,3 +31,13 @@ def test_verifier_cancellation_reaps_process(tmp_path, cpu_artifact, monkeypatch
         verify_in_worker(path, descriptor, time.monotonic()+.2, lambda:False)
     assert len(children) == 1 and children[0].poll() is not None
     assert all(pipe.closed for pipe in (children[0].stdin, children[0].stdout, children[0].stderr))
+
+
+def test_verifier_peak_excludes_parent_pre_exec_memory(tmp_path,cpu_artifact):
+    import numpy as np
+    descriptor,payload=cpu_artifact
+    path=tmp_path/'index.faiss';path.write_bytes(payload)
+    retained=np.ones(256*1024**2,dtype=np.uint8)
+    result=verify_in_worker(path,descriptor,time.monotonic()+10,lambda:False)
+    assert result['worker_peak_rss_bytes']<256*1024**2
+    assert retained[0]==1

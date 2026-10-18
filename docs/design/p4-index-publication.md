@@ -175,7 +175,7 @@ SnapshotBatch 追加仅在最终批次出现的 `snapshot_complete`、`snapshot_
 - 默认单工件最大 256 MiB；storage 工件+staging 预算 2 GiB，预留剩余磁盘空间 256 MiB。上传开始即按声明长度预留，额外字节拒绝；失败释放预留。空间不足明确失败，不自动删除受保护工件。
 - 存储保持 8 RPC worker、4 个共享重操作名额。Upload/Download/Finalize 同扫描共享这 4 个名额，并额外受全局最多 2 个工件重操作、1 个 verifier 限制；所有准入非阻塞。Begin/GetStatus/EndRead/FetchVectors 不占这些重操作名额。
 - 每库最多 1 个发布；计算侧构建/加载合计最多 1 个 CPU 维护任务。保持 CPU 驻留默认 256 MiB/8 条目和估算工作集不超过其两倍；加载估算需包含下载缓冲、原生对象、排序校验副本和已有驻留，超预算拒绝。流分块不等于常量总内存。
-- 加载的首版保守预检式为 `resident_bytes + 3*payload_size + 2*row_count*(4*dimension+8)`，上限为两倍CPU驻留预算；verifier使用去掉resident项的相同公式与512MiB预算比较。整数运算先检查字段范围，拒绝巨大声明；实测发现低估应收紧系数并记录依据，不把估算视为RSS保证。
+- 加载的保守预检式为 `resident_bytes + 3*payload_size + 2*row_count*(4*dimension+8)`，上限为两倍CPU驻留预算；verifier使用去掉resident项的公式再加128MiB新解释器/原生库余量，与512MiB预算比较（2026-10-18实测补入）。整数运算先检查字段范围，拒绝巨大声明；实测发现低估应收紧系数并记录依据，不把估算视为RSS保证。
 - verifier 使用新解释器、deadline、内存估算及强制回收；默认 512 MiB 估算预算、1 个任务。它不训练，不打开 DuckDB，只解析 staging payload 与不可变预期描述。实现时测量峰值，不宣称 native RSS 硬限。
 - 应用层自动重试保持 0。恢复命令/运维重试先查询持久状态；相同 ID 的重放不能创建第二次发布。
 

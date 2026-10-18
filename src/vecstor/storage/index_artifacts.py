@@ -166,7 +166,9 @@ class ArtifactStore:
                     self._ready[descriptor.artifact_id] = descriptor
                     self._statistics[descriptor.artifact_id]=dict(storage_verify_ms=verification['verify_ms'],
                         storage_install_ms=(time.monotonic()-install_started)*1000,
-                        verifier_peak_rss_bytes=verification['worker_peak_rss_bytes'],storage_catalog_commit_ms=None)
+                        verifier_peak_rss_bytes=verification['worker_peak_rss_bytes'],
+                        verifier_process_ru_maxrss_bytes=verification['worker_process_ru_maxrss_bytes'],
+                        verifier_peak_rss_scope=verification['worker_peak_rss_scope'],storage_catalog_commit_ms=None)
             self.abort_upload(operation)
             return descriptor
         finally:

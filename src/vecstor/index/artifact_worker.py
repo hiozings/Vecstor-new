@@ -22,7 +22,8 @@ def _check(deadline, cancelled):
 
 def verify_in_worker(path, descriptor, deadline, cancelled, max_working_bytes=512*1024**2):
     descriptor = ArtifactDescriptor.from_dict(descriptor.to_dict())
-    require(working_bytes(descriptor) <= max_working_bytes, 'artifact_verifier_budget', 'RESOURCE_EXHAUSTED')
+    # The fresh verifier also pays interpreter/native-library startup overhead.
+    require(working_bytes(descriptor)+128*1024**2 <= max_working_bytes, 'artifact_verifier_budget', 'RESOURCE_EXHAUSTED')
     _check(deadline, cancelled)
     request = canonical(dict(path=str(path), descriptor=descriptor.to_dict()))
     process = subprocess.Popen([sys.executable, '-m', 'vecstor.index.artifact_worker'],
@@ -67,9 +68,13 @@ def main():
             require(os.fstat(source.fileno()).st_size == descriptor.payload_size, 'artifact_payload_size', 'DATA_LOSS')
             payload = source.read(descriptor.payload_size+1)
         handle = validate_artifact(payload, descriptor)
+        post_exec_peak=int(next(line.split()[1] for line in Path('/proc/self/status').read_text().splitlines()
+                                if line.startswith('VmHWM:')))*1024
         report = dict(ok=True, row_count=handle.row_count, snapshot_sha256=descriptor.snapshot_sha256,
                       verify_ms=(time.monotonic()-started)*1000,
-                      worker_peak_rss_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024)
+                      worker_peak_rss_bytes=post_exec_peak,
+                      worker_process_ru_maxrss_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,
+                      worker_peak_rss_scope='post_exec_linux_proc_VmHWM_through_validation')
     except Exception as error:
         report = dict(ok=False, code=error.code if isinstance(error, ArtifactError) else 'DATA_LOSS', reason=str(error))
     sys.stdout.buffer.write(canonical(report))
