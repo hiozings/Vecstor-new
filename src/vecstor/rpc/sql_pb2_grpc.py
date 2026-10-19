@@ -838,6 +838,16 @@ class SQLComputeStub:
         Args:
             channel: A grpc.Channel.
         """
+        self.GetDataCacheStats = channel.unary_unary(
+                '/vecstor.v2.SQLCompute/GetDataCacheStats',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.DataCacheRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
+                _registered_method=True)
+        self.ClearDataCache = channel.unary_unary(
+                '/vecstor.v2.SQLCompute/ClearDataCache',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.DataCacheRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
+                _registered_method=True)
         self.Control = channel.unary_unary(
                 '/vecstor.v2.SQLCompute/Control',
                 request_serializer=vecstor_dot_rpc_dot_sql__pb2.ControlRequest.SerializeToString,
@@ -902,6 +912,18 @@ class SQLComputeStub:
 
 class SQLComputeServicer:
     """Missing associated documentation comment in .proto file."""
+
+    def GetDataCacheStats(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ClearDataCache(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def Control(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -978,6 +1000,16 @@ class SQLComputeServicer:
 
 def add_SQLComputeServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'GetDataCacheStats': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetDataCacheStats,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.DataCacheRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.SerializeToString,
+            ),
+            'ClearDataCache': grpc.unary_unary_rpc_method_handler(
+                    servicer.ClearDataCache,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.DataCacheRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.ControlResponse.SerializeToString,
+            ),
             'Control': grpc.unary_unary_rpc_method_handler(
                     servicer.Control,
                     request_deserializer=vecstor_dot_rpc_dot_sql__pb2.ControlRequest.FromString,
@@ -1048,6 +1080,60 @@ def add_SQLComputeServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class SQLCompute:
     """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def GetDataCacheStats(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLCompute/GetDataCacheStats',
+            vecstor_dot_rpc_dot_sql__pb2.DataCacheRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ClearDataCache(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLCompute/ClearDataCache',
+            vecstor_dot_rpc_dot_sql__pb2.DataCacheRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.ControlResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def Control(request,

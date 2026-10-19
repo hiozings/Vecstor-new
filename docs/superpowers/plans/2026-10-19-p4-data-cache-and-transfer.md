@@ -1,6 +1,6 @@
 # P4 有界数据缓存与传输优化实施计划
 
-> 执行时使用executing-plans，按任务推进、每任务先失败测试再实现；如用户另选代理执行方式再调整。**本文件是2026-10-19规划交付，不是业务实施记录。2026-10-19已按用户授权开始实施：T1—T3完成，T4—T8待实施。** 后续Git检查、建分支及提交须有适用于本子阶段的用户授权，不把旧索引阶段授权自动扩为合并/推送授权。
+> 执行时使用executing-plans，按任务推进、每任务先失败测试再实现；如用户另选代理执行方式再调整。**本文件是2026-10-19规划交付，不是业务实施记录。2026-10-19已按用户授权开始实施：T1—T6完成，T7—T8待实施。** 后续Git检查、建分支及提交须有适用于本子阶段的用户授权，不把旧索引阶段授权自动扩为合并/推送授权。
 
 **Goal:** 在既有MVCC/工件身份约束下交付有界向量缓存、按需元数据与选择性fused读取，保留独立开关，用真实双节点/故障/资源及配对实验验证。
 
@@ -108,11 +108,11 @@
 - `scan(sql) -> Iterator[list[dict]]`、`filter(sql,ids) -> list[dict]`按projected选择新/旧RPC；T4仅接separate。`describe() -> dict`返回请求局部统计。
 - execute_vector新增可选data_cache参数（默认None），服务拥有一个cache、close清理；io.open成功后、任何缓存访问前调用configure_cache_lease，cache关闭无需新epoch；索引build/publication不传cache。计划字段按设计§8。
 
-- [ ] 先写cold/warm/partial真实RPC测试，固定64条：暖读取vectors_fetched=0，vectors_served_from_cache=64，rpc_calls减少1，结果及工件身份一致；部分hit保留调用方顺序，cache off不touchLRU。
-- [ ] 写C03/C04/C06测试：不同WHERE共享向量但结果不同；旧租约跨写入、新revision/他表写入/新table_id隔离；同revision换artifact仍可用数据但不能用旧ANN；CORRUPT不可因缓存成功而回退。
-- [ ] 写exact默认lookup-only、scan-admission开关、精确回退、不足K/空结果测试；snapshot/publish/load从不填缓存。
-- [ ] 写EXPLAIN无lookup/touch、ANALYZE一次、并发计数局部、全命中TTL/取消、clear竞态测试；只读取已通过RPC校验的向量。
-- [ ] 先RED后接入；运行新execution测试、test_p4_index_consistency.py、test_p3_execution.py、test_index_artifact_loading.py。通过后提交建议`feat: reuse validated vectors across leased queries`。
+- [x] 先写cold/warm/partial真实RPC测试，固定64条：暖读取vectors_fetched=0，vectors_served_from_cache=64，rpc_calls减少1，结果及工件身份一致；部分hit保留调用方顺序，cache off不touchLRU。
+- [x] 写C03/C04/C06测试：不同WHERE共享向量但结果不同；旧租约跨写入、新revision/他表写入/新table_id隔离；同revision换artifact仍可用数据但不能用旧ANN；CORRUPT不可因缓存成功而回退。
+- [x] 写exact默认lookup-only、scan-admission开关、精确回退、不足K/空结果测试；snapshot/publish/load从不填缓存。
+- [x] 写EXPLAIN无lookup/touch、ANALYZE一次、并发计数局部、全命中TTL/取消、clear竞态测试；只读取已通过RPC校验的向量。
+- [x] 先RED后接入；运行新execution测试、test_p4_index_consistency.py、test_p3_execution.py、test_index_artifact_loading.py。通过后提交建议`feat: reuse validated vectors across leased queries`。
 
 ## Task 5：fused缓存交互及按需输出物化
 
@@ -122,13 +122,13 @@
 
 - `CachedLeaseReader.filter_fetch(sql: str, ids: list[int]) -> tuple[list[dict], np.ndarray]`：先获取batch并得missing_ids；新RPC传全部ids、fields、missing_ids；完整校验后batch.finish(matched_ids,remote_ids,vectors)。cache off+full走原io.filter_fetch，projected无cache仍走新RPC。
 - 计数hit_rows为lookup命中、vectors_served_from_cache只计通过WHERE的命中；请求local计数随递归拆分只累计实际执行，不能二分父节点和子节点双计lookup。
-- `TopK(..., materialize_vector: bool=True)`增加可选参数；优化模式只保留选中K行vector拷贝，最终输出一次转换；旧full默认路径保持。
+- `TopK(..., materialize_vector: bool | None=None)`增加可选参数；优化模式只保留选中K行vector拷贝，最终输出一次转换；旧full默认路径保持。
 
-- [ ] 写全miss/全hit/partial、缓存命中但WHERE失败、多个候选轮次无重复、精确回退、GPU→CPU同工件回退测试。暖fused仍1次过滤RPC但vector裸字节为0。
-- [ ] 写完整交集响应被破坏时，即使坏ID在缓存中也DATA_LOSS；超4MiB二分与单行失败；workspace满不得偷偷改requested fused为separate，只跳过缓存并记录bypass。
-- [ ] 写TopK id/distance/alias/*/vector投影、同距离id排序、K大于合法数；无vector投影不创建候选vector列表，有vector仅为保留行拷贝且不挂住整批buffer。
-- [ ] 运行失败测试→实现→同测试及test_fused_candidates.py、test_gpu_execution.py、test_p4_gpu_restore.py。GPU必须真实运行，CPU-only不能算此任务GPU通过。
-- [ ] 通过后提交建议`perf: fetch only uncached candidate vectors and required output fields`。
+- [x] 写全miss/全hit/partial、缓存命中但WHERE失败、多个候选轮次无重复、精确回退、GPU→CPU同工件回退测试。暖fused仍1次过滤RPC但vector裸字节为0。
+- [x] 写完整交集响应被破坏时，即使坏ID在缓存中也DATA_LOSS；超4MiB二分与单行失败；workspace满不得偷偷改requested fused为separate，只跳过缓存并记录bypass。
+- [x] 写TopK id/distance/alias/*/vector投影、同距离id排序、K大于合法数；无vector投影不创建候选vector列表，有vector仅为保留行拷贝且不挂住整批buffer。
+- [x] 运行失败测试→实现→同测试及test_fused_candidates.py、test_gpu_execution.py、test_p4_gpu_restore.py。GPU必须真实运行，CPU-only不能算此任务GPU通过。
+- [x] 通过后提交建议`perf: fetch only uncached candidate vectors and required output fields`。
 
 ## Task 6：用户配置、能力兼容和本地缓存管理
 
@@ -141,9 +141,9 @@
 - `SessionClient.data_cache_stats() -> dict`、`clear_data_cache() -> dict`只调用计算服务RPC；shell/cache_commands.py解析`.cache stats|clear`，不支持隐式清存储。
 - 向量完成帧确认requested/effective cache和projection、data_read_version；cache因workspace bypass属于已执行策略而非协议不支持，不能被客户端误拒绝。
 
-- [ ] 写合法/非法/重复SETTINGS、启动0MiB+request on拒绝、off不touch、旧计算忽略选项拒绝、旧存储缺epoch/读取能力拒绝、新服务关闭模式兼容。
-- [ ] 写热会话server_instance_id改变后能力重新获取、普通CRUD成功确认不被cache选项污染；clear当前库不清其他库/索引/持久数据，未选库拒绝。
-- [ ] RED→实现并生成proto；运行新settings/controls及test_execution_settings.py、test_capability_cache.py、test_shell_ui.py。测试后补help/补全，提交建议`feat: expose independent cache and projection controls`。
+- [x] 写合法/非法/重复SETTINGS、启动0MiB+request on拒绝、off不touch、旧计算忽略选项拒绝、旧存储缺epoch/读取能力拒绝、新服务关闭模式兼容。
+- [x] 写热会话server_instance_id改变后能力重新获取、普通CRUD成功确认不被cache选项污染；clear当前库不清其他库/索引/持久数据，未选库拒绝。
+- [x] RED→实现并生成proto；运行新settings/controls及test_execution_settings.py、test_capability_cache.py、test_shell_ui.py。测试后补help/补全，提交建议`feat: expose independent cache and projection controls`。
 
 ## Task 7：真实双节点、故障和隔离验收
 

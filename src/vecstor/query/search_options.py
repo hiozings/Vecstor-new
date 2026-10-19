@@ -11,6 +11,8 @@ def validate_profile_id(value):
 
 @dataclass(frozen=True)
 class SearchOptions:
+    data_cache: str = 'default'
+    metadata_projection: str = 'default'
     candidate_data_path: str = 'default'
     device: str = 'cpu'
     gpu_id: int = 0
@@ -25,6 +27,8 @@ class SearchOptions:
     quality_profile_id: str | None = None
 
     def validate(self):
+        if self.data_cache not in ('default','off','on'):raise ValueError('Invalid data_cache option')
+        if self.metadata_projection not in ('default','full','projected'):raise ValueError('Invalid metadata_projection option')
         if self.candidate_data_path not in ('default','separate','fused'):raise ValueError('Invalid candidate_data_path')
         if self.candidate_data_path=='fused' and (self.mode!='approx' or self.path!='search-first'):
             raise ValueError('Fused candidate reads require approx/search-first')
@@ -54,7 +58,7 @@ class SearchOptions:
 
     @classmethod
     def from_proto(cls, value):
-        options = {name: getattr(value, name) for name in ('mode', 'path', 'fallback', 'quality_profile_id', 'device', 'device_fallback', 'candidate_data_path') if getattr(value, name)}
+        options = {name: getattr(value, name) for name in ('mode', 'path', 'fallback', 'quality_profile_id', 'device', 'device_fallback', 'candidate_data_path', 'data_cache', 'metadata_projection') if getattr(value, name)}
         options.update({name: getattr(value, name) for name in ('nprobe', 'candidates', 'max_candidates', 'max_rounds') if value.HasField(name)})
         if value.HasField('gpu_id'):options['gpu_id']=value.gpu_id
         return cls(**options).validate()

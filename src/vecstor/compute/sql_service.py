@@ -38,11 +38,13 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 if caps.get('index_publication_version') != 1: raise ValueError('Storage does not support published indexes')
             except Exception:
                 self.channel.close(); raise
+        self._read_capabilities=None
         if self.data_cache.config.max_bytes or metadata_projection=='projected':
             try:
                 caps=json.loads(self.stub.Control(pb.ControlRequest(action='capabilities'),timeout=min(timeout,5)).json_result)
                 if self.data_cache.config.max_bytes and caps.get('data_cache_epoch_version')!=1:raise ValueError('Storage lacks data cache epoch capability')
-                if metadata_projection=='projected' and caps.get('data_read_version')!=1:raise ValueError('Storage lacks projected read capability')
+                if (metadata_projection=='projected' or (self.data_cache.config.max_bytes and fused_candidates)) and caps.get('data_read_version')!=1:raise ValueError('Storage lacks projected read capability')
+                self._read_capabilities=caps
             except Exception:
                 self.channel.close();raise
         self.timeout = timeout
@@ -99,10 +101,20 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 if options.candidate_data_path=='fused' and not self.fused_candidates:
                     raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'Fused candidate reads are not enabled')
                 use_fused=self.fused_candidates and options.candidate_data_path!='separate'
+                cache_enabled=(self.data_cache.config.max_bytes>0) if options.data_cache=='default' else options.data_cache=='on'
+                if cache_enabled and self.data_cache.config.max_bytes==0:
+                    raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'Data cache has zero configured capacity')
+                projection=self.metadata_projection if options.metadata_projection=='default' else options.metadata_projection
+                control_cost=self._ensure_data_read_capabilities(cache_enabled,projection=='projected',use_fused,context,deadline)
                 normalized=pb.SQLRequest.FromString(request.SerializeToString())
                 normalized.sql=plan.sql
                 output=execute_vector(self.stub,self.index_manager.registry,normalized,plan.vector,options,
-                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry,fused_candidates=use_fused,index_source=self.index_source,data_cache=self.data_cache,metadata_projection=self.metadata_projection)
+                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry,fused_candidates=use_fused,index_source=self.index_source,data_cache=self.data_cache,metadata_projection=projection,cache_enabled=cache_enabled)
+                execution=output['execution_plan']
+                execution['counts']['storage_capability_rpc_calls']=control_cost['calls']
+                execution['counts']['rpc_calls']+=control_cost['calls']
+                execution['counts']['rpc_payload_bytes']+=control_cost['bytes']
+                execution['rpc_wait_ms']+=control_cost['wait_ms']
                 deadline=min(deadline,output.pop('_data_cache_deadline',deadline))
                 output['execution_plan']['server_instance_id']=self.server_instance_id
                 output['execution_plan']['server_admission_ms']=getattr(context,'vecstor_admission_ms',None)
@@ -133,8 +145,41 @@ class SQLComputeService(rpc.SQLComputeServicer):
     def GetSearchCapabilities(self,request,context):
         return pb.ControlResponse(json_result=json.dumps({'server_instance_id':self.server_instance_id,'fused_candidates':self.fused_candidates,'candidate_data_paths':['separate','fused'] if self.fused_candidates else ['separate'],'ann':True,'algorithm':'cpu_ivfflat',
             'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':True,'gpu_paths':['search-first'],'gpu_max_search_k':2048,'gpu_max_nprobe':2048,
+            'data_cache_version':1,'metadata_projection_version':1,
+            'data_cache_enabled':self.data_cache.config.max_bytes>0,'metadata_projection_default':self.metadata_projection,
             'execution_settings_version':1,'index_devices_version':1,'index_publication_version':1,
             'index_source':getattr(self,'index_source','local'),'quality_profile_versions':[1,2,3],'quality_profiles':self.quality_catalog.list()}))
+
+    def _ensure_data_read_capabilities(self,cache_enabled,projected,fused,context,deadline):
+        cost=dict(calls=0,bytes=0,wait_ms=0.)
+        if not cache_enabled and not projected:return cost
+        caps=self._read_capabilities
+        if caps is None:
+            request=pb.ControlRequest(action='capabilities');started=time.monotonic()
+            call=self.stub.Control.future(request,timeout=self._remaining(context,deadline))
+            context.add_callback(call.cancel)
+            try:reply=call.result()
+            except grpc.FutureCancelledError as error:
+                raise RemoteError(grpc.StatusCode.CANCELLED,'Capability request cancelled') from error
+            finally:call.cancel()
+            cost=dict(calls=1,bytes=request.ByteSize()+reply.ByteSize(),wait_ms=(time.monotonic()-started)*1000)
+            caps=json.loads(reply.json_result)
+        if not isinstance(caps,dict) or (cache_enabled and caps.get('data_cache_epoch_version')!=1):
+            raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'Storage lacks data cache epoch capability')
+        if (projected or (cache_enabled and fused)) and caps.get('data_read_version')!=1:
+            raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'Storage lacks projected read capability')
+        self._read_capabilities=caps
+        return cost
+
+    def GetDataCacheStats(self,request,context):
+        active(context)
+        if not request.database_id:context.abort(grpc.StatusCode.INVALID_ARGUMENT,'Select a database first')
+        return pb.ControlResponse(json_result=json.dumps(self.data_cache.stats(request.database_id)))
+
+    def ClearDataCache(self,request,context):
+        active(context)
+        if not request.database_id:context.abort(grpc.StatusCode.INVALID_ARGUMENT,'Select a database first')
+        return pb.ControlResponse(json_result=json.dumps(self.data_cache.clear(request.database_id)))
 
     def _index_error(self, context, error):
         from vecstor.index.artifact import ArtifactError

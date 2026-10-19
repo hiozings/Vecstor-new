@@ -42,7 +42,7 @@ class TopK:
         self.trace['rerank_ms']+=(time.monotonic()-started)*1000
 
 
-def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None,fused_candidates=False,index_source='local',data_cache=None,metadata_projection='full'):
+def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None,fused_candidates=False,index_source='local',data_cache=None,metadata_projection='full',cache_enabled=None):
     started=time.monotonic()
     trace={'plan_version':1,'requested_mode':options.mode,'requested_path':options.path,
            'requested_device':options.device,'actual_device':'cpu','device_fallback_reason':None,'device_attempts':[],
@@ -66,7 +66,9 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
         from vecstor.query.read_projection import required_metadata_fields
         projected=metadata_projection=='projected'
         reader=CachedLeaseReader(io,data_cache,required_metadata_fields(plan,projected),projected,
-                                 data_cache is not None and data_cache.config.max_bytes>0)
+                                 (data_cache is not None and data_cache.config.max_bytes>0) if cache_enabled is None else cache_enabled)
+        reader.statistics['requested']=options.data_cache
+        trace['metadata_projection']=dict(requested=options.metadata_projection,effective=metadata_projection)
         deadline=io.deadline
         trace['data_read_version']=1
         trace['counts']['vectors_used_for_rerank']=0

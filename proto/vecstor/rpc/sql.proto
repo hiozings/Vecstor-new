@@ -25,6 +25,8 @@ message SearchOptions {
   optional uint32 gpu_id = 10;
   string device_fallback = 11;
   string candidate_data_path = 12;
+  string data_cache = 13;
+  string metadata_projection = 14;
 }
 message QueryExecutionPlan { string json_payload = 1; }
 message SQLRequest { string database_id = 1; string sql = 2; string operation_id = 3; SearchOptions search_options = 4; }
@@ -310,7 +312,10 @@ service SQLStorage {
   rpc DownloadIndexArtifact(DownloadIndexArtifactRequest) returns (stream IndexArtifactFrame);
   rpc PruneIndexArtifacts(PruneIndexArtifactsRequest) returns (PruneIndexArtifactsResponse);
 }
+message DataCacheRequest { string database_id = 1; }
 service SQLCompute {
+  rpc GetDataCacheStats(DataCacheRequest) returns (ControlResponse);
+  rpc ClearDataCache(DataCacheRequest) returns (ControlResponse);
   rpc Control(ControlRequest) returns (ControlResponse);
   rpc ExecuteSQL(SQLRequest) returns (stream ResultFrame);
   rpc GetSearchCapabilities(vecstor.v1.Empty) returns (ControlResponse);

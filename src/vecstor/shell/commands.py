@@ -31,6 +31,9 @@ End SQL with ; then Enter. Multiple statements commit independently.
 .index publication-status OPERATION_ID
 .index prune [--keep-last N] [--execute --operation-id ID]
                          Preview by default; clear never deletes stored artifacts
+.cache stats|clear        Inspect/clear selected database compute data cache
+.search data-cache default|off|on
+.search metadata-projection default|full|projected
 .plan on|off              Toggle detailed execution plans
 EXPLAIN [ANALYZE] SELECT  Explain a vector SELECT
 .clear / .quit            Clear input / exit
@@ -42,7 +45,7 @@ Example: .open demo --create
 def dispatch(shell, text):
     parts = shlex.split(text)
     command, args = parts[0], parts[1:]
-    arities = {'.help': (0,), '.databases': (0,), '.open': (1, 2), '.datasets': (0,), '.import': (2,), '.tables': (0,), '.schema': (0, 1), '.status': (1,), '.mode': (1,), '.timer': (1,), '.clear': (0,), '.quit': (0,), '.search': (0, 1, 2), '.index': (1, 2, 3, 4, 6, 8, 10), '.plan': (1,)}
+    arities = {'.help': (0,), '.databases': (0,), '.open': (1, 2), '.datasets': (0,), '.import': (2,), '.tables': (0,), '.schema': (0, 1), '.status': (1,), '.mode': (1,), '.timer': (1,), '.clear': (0,), '.quit': (0,), '.search': (0, 1, 2), '.index': (1, 2, 3, 4, 6, 8, 10), '.plan': (1,), '.cache': (1,)}
     if command not in arities or (command!='.index' and len(args) not in arities[command]):
         raise ValueError('Unknown command or invalid arguments. Use .help.')
     client = shell.client
@@ -58,6 +61,9 @@ def dispatch(shell, text):
         else:
             raise ValueError('Usage: .search [reset|KEY VALUE]')
         render_result(shell.console, result, shell.mode)
+    elif command == '.cache':
+        from .cache_commands import execute_cache
+        render_result(shell.console,execute_cache(client,args),shell.mode)
     elif command == '.plan':
         if args[0] not in ('on', 'off'):
             raise ValueError('Usage: .plan on|off')

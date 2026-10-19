@@ -119,7 +119,7 @@ GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复
 
 P4索引子阶段T1—T9已于2026-10-18完成：[设计](docs/design/p4-index-publication.md)、[实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)、[使用说明](docs/p4-indexes.md)、[验收记录](docs/validation/p4-indexes.md)。计算侧显式构建，存储校验/落盘/目录原子发布，读租约绑定权威工件，双计算节点RPC加载；支持批量写入后完整重建、零训练重启、GPU重克隆、v3工件质量绑定及引用保护GC。最终不设置PYTHONPATH的真实GPU完整回归687通过，另补4项进程验收通过；1万/10万规模、12组生命周期成本和CPU/GPU各500条冻结留出验证通过。审查补齐目录同步重试、DROP表回收与上传清理重试。保持数据库级revision；数据缓存、自适应策略、表级版本与增量维护尚未实现，不代表全部P4完成。
 
-P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/design/p4-data-cache-and-transfer.md)及[八任务实施计划](docs/superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)，T1缓存内核、T2 epoch/TTL协议和T3投影/选择性读取已实现，分别40/36/51项定向回归通过；计算查询接入与用户开关等T4—T8仍待实施。拟采用计算侧按storage epoch/数据库/表/revision隔离的有界原始向量缓存、miss批量读取、按需元数据与选择性fused返回；默认关闭，缓存/字段投影/合并路径独立消融。保留每请求读租约与存储过滤，明确缓存逻辑容量、临时工作区和实际RSS的区别；自适应策略、增量维护与过滤结果缓存仍后置。规划中的新命令、参数和协议尚不可用，本轮只检查文档与既有成本证据。
+P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/design/p4-data-cache-and-transfer.md)及[八任务实施计划](docs/superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)，T1—T6已实现：有界内核、epoch/TTL、投影/选择性RPC、separate/fused缓存与用户开关已接入，最新68项控制/缓存回归通过；T7—T8真实规模/故障及正式成本验收仍待完成。拟采用计算侧按storage epoch/数据库/表/revision隔离的有界原始向量缓存、miss批量读取、按需元数据与选择性fused返回；默认关闭，缓存/字段投影/合并路径独立消融。保留每请求读租约与存储过滤，明确缓存逻辑容量、临时工作区和实际RSS的区别；自适应策略、增量维护与过滤结果缓存仍后置。缓存/投影命令已接入但正式交付尚未验收，不代表缓存子阶段完成。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -159,7 +159,7 @@ P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/
 ├── proto/vecstor/rpc/services.proto # P2 v1 协议源文件
 ├── proto/vecstor/rpc/sql.proto # v2 目录/SQL/读租约与 P3 快照导出/索引/计划协议
 ├── src/vecstor/
-│   ├── cache/            # 有界版本向量LRU、独立字节所有权及批内工作区（T1完成，查询未接入）
+│   ├── cache/            # 有界版本向量LRU、独立字节所有权及批内工作区（已接入v2向量查询，正式验收待T7—T8）
 │   ├── __init__.py
 │   ├── __main__.py       # console-script 与 shell/serve/旧命令路由
 │   ├── data.py           # 数据与向量校验、只读数组副本

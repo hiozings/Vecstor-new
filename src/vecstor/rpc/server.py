@@ -28,6 +28,10 @@ def main(argv=None):
     compute.add_argument("--listen", default="127.0.0.1:50052")
     compute.add_argument("--timeout", type=float, default=10)
     compute.add_argument("--batch-rows", type=int, default=256)
+    compute.add_argument('--data-cache-mib',type=int,default=0)
+    compute.add_argument('--data-cache-max-entries',type=int,default=65536)
+    compute.add_argument('--data-cache-scan-admission',choices=('off','on'),default='off')
+    compute.add_argument('--metadata-projection',choices=('full','projected'),default='full')
     compute.add_argument("--index-memory-mib",type=int,default=256)
     compute.add_argument("--index-max-entries",type=int,default=8)
     compute.add_argument('--index-source',choices=('local','published'),default='local')
@@ -63,9 +67,12 @@ def main(argv=None):
                 isolation=restrict_compute_filesystem(args.isolate_storage_dir,gpu=True)
                 print(json.dumps(isolation), flush=True)
                 gpu_options['isolation_probe']=[isolation['storage_directory'],isolation['probe_file'],*isolation.get('artifact_probe_files',[])]
+            from vecstor.cache.types import CacheConfig
+            cache_config=CacheConfig(max_bytes=args.data_cache_mib*1024**2,max_entries=args.data_cache_max_entries,
+                                     scan_admission=args.data_cache_scan_admission=='on')
             from vecstor.compute.service import create_compute_server
             server, port, backend = create_compute_server(args.storage, args.listen, args.timeout, args.batch_rows,
-                                                        args.index_memory_mib,args.index_max_entries,quality_document,gpu_options,args.fused_candidates,args.index_source)
+                                                        args.index_memory_mib,args.index_max_entries,quality_document,gpu_options,args.fused_candidates,args.index_source,cache_config,args.metadata_projection)
             if targets:
                 try:
                     from vecstor.compute.index_recovery import preload_indexes

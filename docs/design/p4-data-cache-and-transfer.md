@@ -1,6 +1,6 @@
 # P4 有界数据缓存与传输优化设计
 
-日期：2026-10-19。状态：**实施中：T1缓存内核及T2租约协议完成，查询与投影读取尚未接入**。初始规划轮交付设计与实施计划；2026-10-19起按用户授权逐任务实施，不新增依赖。实施入口见[八任务计划](../superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)。
+日期：2026-10-19。状态：**实施中：T1—T6已接入，T7—T8正式生命周期与成本验收待完成**。初始规划轮交付设计与实施计划；2026-10-19起按用户授权逐任务实施，不新增依赖。实施入口见[八任务计划](../superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)。
 
 ## 1. 目标与范围
 
@@ -133,7 +133,7 @@ TopK在各批挑出保留项后仅保留K行需要的metadata/距离。只有投
 - 存储capabilities新增`data_read_version=1`、`data_cache_epoch_version=1`；计算GetSearchCapabilities新增`data_cache_version=1`、`metadata_projection_version=1`、cache配置/可用状态。新RPC请求不得依赖服务端忽略未知字段来“兼容”。
 - SQLCompute新增GetDataCacheStats/ClearDataCache（请求database_id，响应沿用ControlResponse JSON），不透传存储Control。CLI为`.cache stats|clear`。
 
-启动参数`--metadata-projection full|projected`默认full；缓存是否默认打开由data-cache-mib>0决定。逐请求off不查不写缓存；on在配置容量0时拒绝；default继承启动配置。显式full覆盖启动projected。会话`.search`及SQL SETTINGS支持同名字符串选项；`.reset`清选项，不清缓存。拟例：`SETTINGS data_cache='on', metadata_projection='projected'`。
+启动参数`--metadata-projection full|projected`默认full；缓存是否默认打开由data-cache-mib>0决定。逐请求off不查不写缓存；on在配置容量0时拒绝；default继承启动配置。显式full覆盖启动projected。会话`.search`及SQL SETTINGS支持同名字符串选项；`.search reset`清选项，不清缓存。拟例：`SETTINGS data_cache='on', metadata_projection='projected'`。
 
 启动配置或请求显式需要新能力而存储不支持时明确拒绝，不静默全字段或无缓存。纯旧路径继续工作。客户端按server_instance_id复用能力并检查向量完成帧确认；若旧计算服务忽略新选项，拒绝成功。普通SQL不能因会话开启缓存而被错误要求向量完成帧确认。
 

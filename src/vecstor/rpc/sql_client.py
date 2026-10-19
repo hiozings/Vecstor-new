@@ -78,6 +78,19 @@ class SessionClient:
     def _invalidate_query_capabilities(self):
         self._query_caps=None;self._caps_endpoint=None;self._quality_supported=None
 
+    def _data_cache_control(self,method):
+        self.last_was_write=False
+        if not self.database_id:raise ValueError('Select a database first')
+        if self.get_search_capabilities().get('data_cache_version')!=1:
+            raise ValueError('Compute service does not support data cache controls')
+        result=self._typed_control(method,pb.DataCacheRequest(database_id=self.database_id))
+        if not isinstance(result,dict) or result.get('data_cache_version')!=1:
+            raise ValueError('Invalid data cache control response')
+        return result
+
+    def data_cache_stats(self):return self._data_cache_control(self.stub.GetDataCacheStats)
+    def clear_data_cache(self):return self._data_cache_control(self.stub.ClearDataCache)
+
     def list_quality_profiles(self):
         caps=self.get_search_capabilities()
         profiles=caps.get('quality_profiles') if isinstance(caps,dict) else None
@@ -224,8 +237,10 @@ class SessionClient:
         effective=resolve_execution_options(self.search_options,plan.settings) if plan.kind=='vector' else self.search_options
         needs_device_ack=plan.kind=='vector' and (bool(plan.settings) or effective.device=='gpu')
         needs_data_ack=plan.kind=='vector' and effective.candidate_data_path!='default'
+        needs_cache_ack=plan.kind=='vector' and effective.data_cache!='default'
+        needs_projection_ack=plan.kind=='vector' and effective.metadata_projection!='default'
         if plan.kind == 'vector':
-            caps=self._query_capabilities() if needs_device_ack or effective.quality_profile_id or effective.candidate_data_path!='default' else None
+            caps=self._query_capabilities() if needs_device_ack or effective.quality_profile_id or effective.candidate_data_path!='default' or needs_cache_ack or needs_projection_ack else None
             if needs_device_ack and (type(caps.get('execution_settings_version')) is not int or caps['execution_settings_version']<1):
                 self._invalidate_query_capabilities()
                 raise ValueError('Compute service does not support SQL device settings')
@@ -234,6 +249,10 @@ class SessionClient:
                 raise ValueError('Compute service does not support quality profiles')
             if effective.candidate_data_path!='default' and effective.candidate_data_path not in caps.get('candidate_data_paths',[]):
                 self._invalidate_query_capabilities();raise ValueError('Compute service does not support requested candidate data path')
+            if needs_cache_ack and caps.get('data_cache_version')!=1:
+                self._invalidate_query_capabilities();raise ValueError('Compute service does not support data cache settings')
+            if needs_projection_ack and caps.get('metadata_projection_version')!=1:
+                self._invalidate_query_capabilities();raise ValueError('Compute service does not support metadata projection settings')
             request.search_options.CopyFrom(effective.to_proto())
             self.last_search_mode = effective.mode
         client_stats={'preflight_ms':(time.perf_counter()-preflight_started)*1000,
@@ -268,6 +287,18 @@ class SessionClient:
                             accepted_paths=('fused','mixed') if effective.candidate_data_path=='fused' else ('separate',)
                             if execution.get('requested_candidate_data_path')!=effective.candidate_data_path or (execution.get('actual_mode')=='approx' and execution.get('candidate_data_path') not in accepted_paths):
                                 raise ValueError('Compute service did not acknowledge candidate data path')
+                        if needs_cache_ack or needs_projection_ack:
+                            execution=event.get('execution_plan') or {}
+                            if execution.get('data_read_version')!=1:
+                                raise ValueError('Compute service did not acknowledge data read settings')
+                            if needs_cache_ack:
+                                cache=execution.get('data_cache') or {}
+                                if cache.get('requested')!=effective.data_cache or cache.get('effective')!=effective.data_cache:
+                                    raise ValueError('Compute service did not acknowledge data cache settings')
+                            if needs_projection_ack:
+                                projection=execution.get('metadata_projection') or {}
+                                if projection.get('requested')!=effective.metadata_projection or projection.get('effective')!=effective.metadata_projection:
+                                    raise ValueError('Compute service did not acknowledge metadata projection settings')
                         profile_id=request.search_options.quality_profile_id
                         if profile_id:
                             execution=event.get('execution_plan') or {}
