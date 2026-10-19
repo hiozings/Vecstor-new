@@ -1,6 +1,6 @@
 # P4 有界数据缓存与传输优化实施计划
 
-> 执行时使用executing-plans，按任务推进、每任务先失败测试再实现；如用户另选代理执行方式再调整。**本文件是2026-10-19规划交付，不是业务实施记录。2026-10-19已按用户授权开始实施：T1—T2完成，T3—T8待实施。** 后续Git检查、建分支及提交须有适用于本子阶段的用户授权，不把旧索引阶段授权自动扩为合并/推送授权。
+> 执行时使用executing-plans，按任务推进、每任务先失败测试再实现；如用户另选代理执行方式再调整。**本文件是2026-10-19规划交付，不是业务实施记录。2026-10-19已按用户授权开始实施：T1—T3完成，T4—T8待实施。** 后续Git检查、建分支及提交须有适用于本子阶段的用户授权，不把旧索引阶段授权自动扩为合并/推送授权。
 
 **Goal:** 在既有MVCC/工件身份约束下交付有界向量缓存、按需元数据与选择性fused读取，保留独立开关，用真实双节点/故障/资源及配对实验验证。
 
@@ -90,12 +90,12 @@
 - `validate_projected_row(row, fields) -> dict`；`decode_projected_candidates(reply, lease, checked_ids, fields, vector_ids) -> tuple[list[dict], list[int], np.ndarray]`；scan校验器保持total/offset/complete状态，结束时必须验证完成。
 - LeaseIO增加`scan_projected(sql,fields)`、`read_projected_candidates(sql,ids,fields,vector_ids)`；所有调用经原call/stream记账及_remaining检查。
 
-- [ ] 写字段/AST测试：`SELECT id AS x,distance`只回id；WHERE category照常有效；SELECT *返回完整，未知字段/乱序/重复拒绝；质量metadata_sql原值不变。
-- [ ] 写真实SQL/RPC测试：checked_ids=[3,1,2]，matched=[3,2]，vector_ids=[1,2]，返回metadata=[3,2]、vector_ids=[2]；未命中的未知ID依然失败；vector_ids必须是checked_ids的有序子集。
-- [ ] 写流损坏测试：漏optional、额外字段、wrong revision/token、错vector顺序、漏交集ID、超大/非有限payload、缺/重复COMPLETE；无部分成功。
-- [ ] 写大category拆帧及单行4MiB失败测试、1MiB向量限制、共享4重操作槽满仍可Fetch/EndRead；大字段不能靠多发未经验证帧绕限。
-- [ ] 先观察上述测试失败；实现新SQL及RPC，计划marker包括fields和选择性向量模式，仍每租约至多一份64KiB源SQL/生成SQL缓存。不要把动态ID具体值塞进SQL计划键或SQL文本。
-- [ ] 通过`test_projected_storage.py test_projected_read_frames.py test_read_projection.py test_fused_candidates.py test_p3_storage.py`后公布data_read_version=1；提交建议`feat: add projected and selective vector read RPCs`。
+- [x] 写字段/AST测试：`SELECT id AS x,distance`只回id；WHERE category照常有效；SELECT *返回完整，未知字段/乱序/重复拒绝；质量metadata_sql原值不变。
+- [x] 写真实SQL/RPC测试：checked_ids=[3,1,2]，matched=[3,2]，vector_ids=[1,2]，返回metadata=[3,2]、vector_ids=[2]；未命中的未知ID依然失败；vector_ids必须是checked_ids的有序子集。
+- [x] 写流损坏测试：漏optional、额外字段、wrong revision/token、错vector顺序、漏交集ID、超大/非有限payload、缺/重复COMPLETE；无部分成功。
+- [x] 写大category拆帧及单行4MiB失败测试、1MiB向量限制、共享4重操作槽满仍可Fetch/EndRead；大字段不能靠多发未经验证帧绕限。
+- [x] 先观察上述测试失败；实现新SQL及RPC，计划marker包括fields和选择性向量模式，仍每租约至多一份64KiB源SQL/生成SQL缓存。不要把动态ID具体值塞进SQL计划键或SQL文本。
+- [x] 通过`test_projected_storage.py test_projected_read_frames.py test_read_projection.py test_fused_candidates.py test_p3_storage.py`后公布data_read_version=1；提交建议`feat: add projected and selective vector read RPCs`。
 
 ## Task 4：separate路径缓存接入与统计
 

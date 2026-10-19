@@ -97,6 +97,12 @@ class DatabaseCatalog:
     def scan(self, database_id, token, sql, timeout=15, cancelled=None):
         return self.database(database_id).call("scan", token, sql,timeout=timeout,cancelled=cancelled)
 
+    def scan_projected(self,database_id,token,sql,fields,timeout=15,cancelled=None):
+        return self.database(database_id).call('scan_projected',token,sql,tuple(fields),timeout=timeout,cancelled=cancelled)
+
+    def read_projected_candidates(self,database_id,token,sql,ids,fields,vector_ids,timeout=15,cancelled=None):
+        return self.database(database_id).call('read_projected_candidates',token,sql,list(ids),tuple(fields),list(vector_ids),timeout=timeout,cancelled=cancelled)
+
     def vectors(self, database_id, token, ids, timeout=15):
         return self.database(database_id).call("vectors", token, list(ids),timeout=timeout)
 

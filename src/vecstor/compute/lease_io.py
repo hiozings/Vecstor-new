@@ -177,6 +177,44 @@ class LeaseIO:
         self.trace['counts']['metadata_rows_returned']+=len(rows);self.trace['counts']['vectors_fetched']+=len(rows)
         return rows,vectors
 
+    def scan_projected(self, sql, fields):
+        from vecstor.query.read_projection import validate_fields
+        from vecstor.rpc.projected_reads import validate_projected_row
+        from vecstor.rpc.common import MAX_MESSAGE_BYTES
+        fields=validate_fields(fields)
+        self.trace['counts']['scan_metadata_calls']+=1
+        total=None;count=0;seen=set();complete=False
+        request=pb.ProjectedScanRequest(database_id=self.database_id,token=self.lease.token,sql=sql,
+                                        batch_rows=self.batch_size,fields=fields)
+        for batch in self.stream(self.stub.ScanProjectedMetadata,request):
+            self._version(batch)
+            if total is None:total=batch.total_rows
+            consistent(not complete and batch.ByteSize()<=MAX_MESSAGE_BYTES and tuple(batch.fields)==fields
+                       and batch.total_rows==total and batch.offset==count and count+len(batch.rows)<=total
+                       and len(batch.rows)<=self.batch_size,'Projected metadata stream coverage mismatch')
+            if self.lease.HasField('row_count'):consistent(total<=self.lease.row_count,'Projected count exceeds snapshot')
+            rows=[validate_projected_row(row,fields) for row in batch.rows]
+            ids=[row['id'] for row in rows]
+            consistent(len(set(ids))==len(ids) and not seen.intersection(ids),'Duplicate projected metadata ID')
+            consistent(bool(rows) or (count==0 and total==0),'Unexpected empty projected frame')
+            seen.update(ids);count+=len(rows)
+            complete=batch.complete
+            consistent(complete==(count==total),'Projected final marker mismatch')
+            self.trace['counts']['metadata_rows_returned']+=len(rows)
+            yield rows
+        consistent(total is not None and complete and count==total,'Incomplete projected metadata stream')
+
+    def read_projected_candidates(self, sql, ids, fields, vector_ids):
+        from vecstor.rpc.projected_reads import decode_projected_candidates
+        self.remaining()
+        self.trace['counts']['filter_candidate_vectors_calls' if vector_ids else 'filter_candidate_calls']+=1
+        reply=self.call(self.stub.ReadProjectedCandidates,pb.ProjectedCandidateRequest(database_id=self.database_id,
+            token=self.lease.token,sql=sql,checked_ids=ids,fields=fields,vector_ids=vector_ids))
+        rows,returned,vectors=decode_projected_candidates(reply,self.lease,ids,fields,vector_ids)
+        self.trace['counts']['metadata_rows_returned']+=len(rows)
+        self.trace['counts']['vectors_fetched']+=len(returned)
+        return rows,returned,vectors
+
     def snapshot(self):
         consistent(self.lease.HasField('row_count'),'Snapshot export requires row count')
         self.trace['counts']['snapshot_calls']+=1

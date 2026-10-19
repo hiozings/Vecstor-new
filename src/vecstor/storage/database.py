@@ -338,6 +338,56 @@ class Database:
         mapping={r[0]:r for r in rows}
         return [mapping[i] for i in ids if i in mapping]
 
+    def _scan_projected(self, token, sql, fields):
+        from vecstor.query.read_projection import project_metadata_sql
+        connection,_,lease=self._lease(token)
+        plan=classify_statement(sql)
+        if plan.vector is None or plan.table!=lease['table']:
+            raise ValueError('Projected query does not match leased table')
+        return self._fetch_rows(connection.execute(project_metadata_sql(plan.vector.metadata_sql,fields)))
+
+    def _read_projected_candidates(self, token, sql, ids, fields, vector_ids):
+        from vecstor.query.read_projection import project_metadata_sql, validate_fields
+        connection,_,lease=self._lease(token)
+        fields=validate_fields(fields);ids=list(ids);vector_ids=list(vector_ids)
+        for values in (ids,vector_ids):
+            if len(values)>1024 or len(set(values))!=len(values) or any(type(i) is not int or not 0<=i<2**63 for i in values):
+                raise ValueError('Projected IDs must be distinct nonnegative int64, at most 1024')
+        requested=set(vector_ids)
+        if vector_ids!=[i for i in ids if i in requested]:raise ValueError('Vector IDs must be an ordered candidate subset')
+        if len(vector_ids)*lease['dimension']*4>1024**2:raise ValueError('Projected vector batch exceeds 1 MiB')
+        marker=('projected',fields,len(ids) if self.candidate_binding=='legacy' else None)
+        cached=self._candidate_plans.get(token) if self.candidate_plan_cache else None
+        if cached is not None and cached[:2]==(sql,marker):statement_sql=cached[2]
+        else:
+            plan=classify_statement(sql)
+            if plan.vector is None or plan.table!=lease['table']:
+                raise ValueError('Projected candidate query does not match leased table')
+            restriction=(sqlglot.parse_one('"id" IN (SELECT unnest(CAST(? AS BIGINT[])))',read='duckdb')
+                         if self.candidate_binding=='text' else
+                         exp.In(this=exp.column('id',quoted=True),expressions=[exp.Placeholder() for _ in ids]))
+            statement=sqlglot.parse_one(project_metadata_sql(plan.vector.metadata_sql,fields),read='duckdb')
+            statement_sql=statement.where(restriction).sql(dialect='duckdb')
+            if self.candidate_plan_cache and max(len(sql.encode()),len(statement_sql.encode()))<=65536:
+                self._candidate_plans[token]=(sql,marker,statement_sql)
+            else:self._candidate_plans.pop(token,None)
+        self._check_time()
+        if not ids:return [],[],np.empty((0,lease['dimension']),dtype='<f4')
+        if self.candidate_binding=='text':
+            parameters=[json.dumps(ids,separators=(',',':'))]
+            present=connection.execute(f"SELECT id FROM {identifier(lease['table'])} WHERE id IN (SELECT unnest(CAST(? AS BIGINT[])))",parameters).fetchall()
+        else:
+            parameters=ids;placeholders=','.join('?' for _ in ids)
+            present=connection.execute(f"SELECT id FROM {identifier(lease['table'])} WHERE id IN ({placeholders})",parameters).fetchall()
+        if {row[0] for row in present}!=set(ids):raise ValueError('Candidate ID does not exist in leased snapshot')
+        self._check_time()
+        rows=self._fetch_rows(connection.execute(statement_sql,parameters));mapping={row[0]:row for row in rows}
+        rows=[mapping[i] for i in ids if i in mapping]
+        selected=[i for i in vector_ids if i in mapping]
+        vectors=self._vectors(token,selected)
+        self._check_time()
+        return rows,selected,vectors
+
     def _end_read(self, token):
         self._candidate_plans.pop(token,None)
         self._snapshot_digests.pop(token, None)

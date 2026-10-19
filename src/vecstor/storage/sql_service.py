@@ -73,7 +73,7 @@ class SQLStorageService(rpc.SQLStorageServicer):
         timeout = _remaining(context)
         try:
             if request.action == 'capabilities':
-                result={'fused_candidate_vectors':True, 'index_publication_version':1, 'data_cache_epoch_version':1}
+                result={'fused_candidate_vectors':True, 'index_publication_version':1, 'data_cache_epoch_version':1, 'data_read_version':1}
             elif request.action == 'list_databases':
                 result = self.catalog.list_databases()
             elif request.action == 'open_database':
@@ -167,6 +167,54 @@ class SQLStorageService(rpc.SQLStorageServicer):
             _abort(context, error)
         finally:
             self._stream_slots.release()
+
+    def ScanProjectedMetadata(self, request, context):
+        from vecstor.query.read_projection import validate_fields
+        if not self._stream_slots.acquire(blocking=False):
+            context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,'At most four active filtering/stream requests are allowed')
+        try:
+            lease=self._lease(request.database_id,request.token)
+            fields=validate_fields(request.fields)
+            batch_rows=request.batch_rows or DEFAULT_BATCH_ROWS
+            if batch_rows>MAX_BATCH_ROWS:raise ValueError('Projected metadata batch exceeds row limit')
+            rows=self.catalog.scan_projected(request.database_id,request.token,request.sql,fields,
+                timeout=_remaining(context),cancelled=lambda:not context.is_active())
+            batch=pb.ProjectedMetadataBatch(token=request.token,revision=lease['revision'],total_rows=len(rows),offset=0,fields=fields)
+            for position,row in enumerate(rows):
+                _remaining(context)
+                item=pb.ProjectedRow(**dict(zip(fields,row)))
+                # Leave room for complete=true (two bytes) in the last frame.
+                batch.rows.append(item)
+                if len(batch.rows)>batch_rows or batch.ByteSize()+2>MAX_MESSAGE_BYTES:
+                    del batch.rows[-1]
+                    if not batch.rows:context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,'projected_response_too_large')
+                    yield batch
+                    batch=pb.ProjectedMetadataBatch(token=request.token,revision=lease['revision'],total_rows=len(rows),offset=position,fields=fields,rows=[item])
+                    if batch.ByteSize()+2>MAX_MESSAGE_BYTES:
+                        context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,'projected_response_too_large')
+            _remaining(context)
+            batch.complete=True
+            yield _bounded(batch,context)
+        except (ValueError,OSError,TimeoutError) as error:_abort(context,error)
+        finally:self._stream_slots.release()
+
+    def ReadProjectedCandidates(self, request, context):
+        from vecstor.query.read_projection import validate_fields
+        if not self._stream_slots.acquire(blocking=False):
+            context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,'At most four active filtering/stream requests are allowed')
+        try:
+            lease=self._lease(request.database_id,request.token);fields=validate_fields(request.fields)
+            rows,vector_ids,vectors=self.catalog.read_projected_candidates(request.database_id,request.token,
+                request.sql,list(request.checked_ids),fields,list(request.vector_ids),
+                timeout=_remaining(context),cancelled=lambda:not context.is_active())
+            _remaining(context)
+            reply=pb.ProjectedCandidateResult(token=request.token,revision=lease['revision'],checked_ids=request.checked_ids,
+                fields=fields,rows=[pb.ProjectedRow(**dict(zip(fields,row))) for row in rows],dimension=lease['dimension'],
+                vector_ids=vector_ids,vectors_f32_le=vectors.astype('<f4',copy=False).tobytes())
+            if reply.ByteSize()>MAX_MESSAGE_BYTES:context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,'projected_response_too_large')
+            return reply
+        except (ValueError,OSError,TimeoutError) as error:_abort(context,error)
+        finally:self._stream_slots.release()
 
     def FetchVectors(self, request, context):
         _remaining(context)
