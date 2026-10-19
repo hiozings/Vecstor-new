@@ -74,3 +74,27 @@ def test_selective_response_error_not_hidden_by_warm_cache(cached,monkeypatch):
         return response
     monkeypatch.setattr(LeaseIO,'call',corrupt)
     with pytest.raises(ValueError,match='DATA_LOSS'):cached.client.execute(SQL)
+
+
+def test_projected_separate_wide_candidates_split_before_topk(cached):
+    # Two legal2MiB rows exceed the response limit together; finalK1 fits.
+    nearest=cached.client.execute(SQL)['rows'][:2]
+    category='x'*(2*1024**2)
+    # Seed valid stored metadata with bound SQL; the public SQL text limit is64KiB.
+    database=cached.backend.catalog.database(cached.client.database_id)
+    def seed_wide_rows():
+        database.connection.execute('BEGIN TRANSACTION')
+        try:
+            database.connection.execute('UPDATE items SET category=? WHERE id=? OR id=?',[category,nearest[0][0],nearest[1][0]])
+            database.connection.execute('UPDATE __vecstor_meta SET revision=revision+1')
+            database.connection.execute('COMMIT')
+        except BaseException:
+            database.connection.execute('ROLLBACK');raise
+    database.pool.submit(seed_wide_rows).result()
+    cached.client.publish_index('items',nlist=1,operation_id='wide');cached.client.load_index('items')
+    cached.compute.metadata_projection='projected'
+    statement=SQL.replace('SELECT id','SELECT id,category').replace('LIMIT 10','LIMIT 1')
+    result=cached.client.execute(statement)
+    assert result['rows']==[[nearest[0][0],category]]
+    assert result['execution_plan']['counts']['projected_size_splits']>0
+    assert result['execution_plan']['candidate_read_protocol']=='selective'

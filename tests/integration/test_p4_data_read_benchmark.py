@@ -54,3 +54,14 @@ def test_matrix_selection_rejects_missing_case_before_creating_output(tmp_path):
     output=tmp_path/'invalid'
     with pytest.raises(ValueError,match='case'):runner['run_data_read_matrix'](output,tier='smoke',case_ids=[999])
     assert not output.exists()
+
+
+def test_full_hotset_contains_160_requests_across_all_twenty_hot_queries():
+    import numpy as np
+    runner=runpy.run_path(str(ROOT/'benchmarks/p4/data_reads.py'))
+    hot=np.arange(500,dtype='<f4').reshape(-1,1)
+    independent=np.arange(1000,1500,dtype='<f4').reshape(-1,1)
+    result=runner['query_pools'](hot,independent,200)['hotset'][:,0]
+    assert np.sum(result<1000)==160
+    assert set(result[result<1000])==set(range(20))
+    assert np.sum(result>=1000)==40

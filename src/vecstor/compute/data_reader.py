@@ -46,9 +46,17 @@ class CachedLeaseReader:
 
     def filter(self,sql,ids):
         if not self.projected:return self.io.filter(sql,ids)
+        self.io.remaining()
+        self.io.trace['candidate_read_protocol']='selective'
         self.io.trace['counts']['read_subbatches']+=1
-        rows,_,_=self.io.read_projected_candidates(sql,ids,self.fields,[])
-        return rows
+        try:
+            rows,_,_=self.io.read_projected_candidates(sql,ids,self.fields,[])
+            return rows
+        except grpc.RpcError as error:
+            if error.code()!=grpc.StatusCode.RESOURCE_EXHAUSTED or error.details()!='projected_response_too_large' or len(ids)<=1:raise
+        self.io.trace['counts']['projected_size_splits']+=1
+        middle=len(ids)//2
+        return self.filter(sql,ids[:middle])+self.filter(sql,ids[middle:])
 
     def _selective_once(self,sql,ids):
         self.io.trace['candidate_read_protocol']='selective'

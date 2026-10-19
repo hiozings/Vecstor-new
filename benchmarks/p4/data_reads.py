@@ -52,6 +52,12 @@ def _options(spec,nlist,profile=None,settings=None):
     return SearchOptions(**options)
 
 
+def query_pools(query_pool,extra_pool,sample_count):
+    queries=query_pool[:sample_count];other=extra_pool[:sample_count]
+    hotspot=np.array([query_pool[(i-i//5-1)%min(20,len(query_pool))] if i%5 else extra_pool[i] for i in range(sample_count)],dtype='<f4')
+    return dict(cold=queries,warm=queries,independent=other,hotset=hotspot)
+
+
 def _summary(name,samples,elapsed):
     ms=[s['ms'] for s in samples];plans=[s['plan'] for s in samples]
     return dict(name=name,requests=len(samples),p50_ms=float(np.median(ms)),
@@ -151,9 +157,7 @@ def run_data_read_matrix(output_dir,*,tier='smoke',seed=20261019,repeats=3,gpu_c
                     reference=cleanup.enter_context(SessionClient(prepare.address,timeout=180));reference.open_database('bench')
                     prepared_cases=[]
                     for case_id,spec in specs:
-                        sample_count=spec['samples'];queries=query_pool[:sample_count];other=extra_pool[:sample_count]
-                        hotspot=np.array([query_pool[i%min(20,len(query_pool))] if i%5 else extra_pool[i] for i in range(sample_count)],dtype='<f4')
-                        pools=dict(cold=queries,warm=queries,independent=other,hotset=hotspot)
+                        pools=query_pools(query_pool,extra_pool,spec['samples'])
                         work=(spec['selectivity'],spec['k'])
                         options=_options(spec,build['nlist'],profiles.get(work),settings.get(work))
                         reference.search_options=options

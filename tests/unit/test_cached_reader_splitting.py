@@ -44,3 +44,24 @@ def test_single_oversized_candidate_is_not_retried():
     with pytest.raises(TooLarge):read.filter_fetch('sql',[1])
     assert calls==[(1,)]
     assert read.cache.stats('db')['process']['workspace_bytes']==0
+
+
+def test_projected_separate_metadata_splits_and_reports_actual_protocol():
+    read,calls=reader(2)
+    rows=read.filter('sql',[3,1,2,0])
+    assert calls==[(3,1,2,0),(3,1),(2,0)]
+    assert rows==[{'id':3},{'id':1},{'id':2},{'id':0}]
+    assert read.io.trace['candidate_read_protocol']=='selective'
+    assert read.io.trace['counts']['projected_size_splits']==1
+
+
+def test_projected_separate_single_oversized_metadata_fails():
+    read,calls=reader(0)
+    with pytest.raises(TooLarge):read.filter('sql',[1])
+    assert calls==[(1,)]
+
+
+def test_projected_separate_small_response_reports_selective_protocol():
+    read,_=reader(2)
+    assert read.filter('sql',[1])==[{'id':1}]
+    assert read.io.trace['candidate_read_protocol']=='selective'
