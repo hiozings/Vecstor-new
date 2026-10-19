@@ -387,3 +387,9 @@ GPU改进版自动复用终端会话的查询能力信息；普通SQL和CRUD仍�
 需要重启后零训练加载或两个计算节点使用相同索引时，计算服务显式设置 `--index-source published`。数据导入后由一个节点 `.index publish 表名 --operation-id 唯一ID`，各节点分别 `.index load 表名`，用 `.index inspect 表名` 核对相同artifact_id与generation。发布成功不等于各节点已加载；写入后须重新完整构建发布，新版本缺索引时明确精确回退或失败。
 
 GPU通过 `.index load 表名 --device gpu` 从同一CPU工件克隆。存储回收使用 `.index prune --keep-last 2` 预览，再加 `--execute --operation-id 唯一ID` 执行；`.index clear`仍只清内存。操作状态、启动预加载、预算、故障与质量配置v3的完整说明见[P4索引说明](p4-indexes.md)，验证范围见[验收记录](validation/p4-indexes.md)。
+
+## P4 数据缓存与字段投影
+
+在计算服务追加`--data-cache-mib 64 --metadata-projection projected`可启用有界向量缓存和按需元数据返回；默认两项关闭。使用`.search data-cache on|off|default`、`.search metadata-projection projected|full|default`或SQL SETTINGS逐请求选择；`.cache stats`查看当前库及进程用量，`.cache clear`只清当前库计算数据缓存，索引和存储数据不变。
+
+开启缓存后命中仍为0时，先检查执行计划：exact扫描默认不填充，只有已有向量才能命中；允许扫描预热需启动`--data-cache-scan-admission on`。新revision、容量/条目限制、不同候选集合也会导致未命中。缓存不提供离线查询；不同计算节点的缓存冷热可不同，但不能使用错版本数据。完整启动、按需传输及恢复边界见[缓存说明](p4-cache.md)。

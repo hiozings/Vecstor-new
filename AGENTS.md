@@ -62,7 +62,7 @@
 | gRPC / Protobuf | 查询、目录、类型化 SQL 结果与读租约 | grpcio/grpcio-tools 1.83.1、protobuf 7.35.1；兼容 P2 v1 并新增 P2.5 v2；P4已接入类型化工件发布/分发与能力确认 |
 | prompt_toolkit / Rich | 多行终端、历史/补全与表格 | 3.0.53 / 15.0.0，已通过 Conda 安装并锁定 |
 | Arrow Flight | 批量列式数据传输 | 可选，只有测出传输瓶颈后再评估 |
-| pytest | 正确性、接口与集成测试 | 9.1.1；最终687项完整回归及4项补充进程验收通过（零跳过），覆盖P1/P2/P2.5/P3/质量/GPU/P4索引，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
+| pytest | 正确性、接口与集成测试 | 9.1.1；缓存审查修复后838项完整真实GPU回归通过（零跳过），覆盖P1/P2/P2.5/P3/质量/GPU/P4索引与缓存，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
 | 容器与部署脚本 | 隔离部署、复现实验 | 随原型补充，不先引入复杂集群平台 |
 
 安装状态与业务集成状态必须分开记录。通过 Conda 管理依赖，不混用 uv/pip 覆盖 Conda 管理的 Faiss、NumPy 和 CUDA 库。`environment.yml` 固定直接依赖，`environments/vecstor-linux-64.explicit.txt` 固定全部 Conda 包的构建和 MD5。保留 CPU 后端，GPU 计算使用本机已有设备。
@@ -119,7 +119,7 @@ GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复
 
 P4索引子阶段T1—T9已于2026-10-18完成：[设计](docs/design/p4-index-publication.md)、[实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)、[使用说明](docs/p4-indexes.md)、[验收记录](docs/validation/p4-indexes.md)。计算侧显式构建，存储校验/落盘/目录原子发布，读租约绑定权威工件，双计算节点RPC加载；支持批量写入后完整重建、零训练重启、GPU重克隆、v3工件质量绑定及引用保护GC。最终不设置PYTHONPATH的真实GPU完整回归687通过，另补4项进程验收通过；1万/10万规模、12组生命周期成本和CPU/GPU各500条冻结留出验证通过。审查补齐目录同步重试、DROP表回收与上传清理重试。保持数据库级revision；数据缓存、自适应策略、表级版本与增量维护尚未实现，不代表全部P4完成。
 
-P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/design/p4-data-cache-and-transfer.md)及[八任务实施计划](docs/superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)，T1—T7已实现：有界内核、epoch/TTL、投影/选择性RPC、separate/fused缓存与用户开关已接入，阶段完整819项真实GPU回归通过；1万/10万/GPU隔离生命周期24/24/26项通过；T8代表性正式成本、最终回归与审查待完成。用户选择保留全量实验入口，本轮只执行代表性正式矩阵。拟采用计算侧按storage epoch/数据库/表/revision隔离的有界原始向量缓存、miss批量读取、按需元数据与选择性fused返回；默认关闭，缓存/字段投影/合并路径独立消融。保留每请求读租约与存储过滤，明确缓存逻辑容量、临时工作区和实际RSS的区别；自适应策略、增量维护与过滤结果缓存仍后置。缓存/投影命令已接入但正式交付尚未验收，不代表缓存子阶段完成。
+P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/design/p4-data-cache-and-transfer.md)及[八任务实施计划](docs/superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)，T1—T7已实现：有界内核、epoch/TTL、投影/选择性RPC、separate/fused缓存与用户开关已接入，审查修复后完整838项真实GPU回归通过；1万/10万/GPU隔离生命周期24/24/26项通过；独立审查及修复完成，T8最终版本代表性正式成本仍在运行。用户选择保留全量实验入口，本轮只执行代表性正式矩阵。拟采用计算侧按storage epoch/数据库/表/revision隔离的有界原始向量缓存、miss批量读取、按需元数据与选择性fused返回；默认关闭，缓存/字段投影/合并路径独立消融。保留每请求读租约与存储过滤，明确缓存逻辑容量、临时工作区和实际RSS的区别；自适应策略、增量维护与过滤结果缓存仍后置。缓存/投影命令已接入但正式交付尚未验收，不代表缓存子阶段完成。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -218,6 +218,7 @@ P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/
 │   ├── validation/gpu-ann-capabilities.md # GPU原生能力边界
 │   ├── validation/gpu-ann.md # GPU质量/隔离/成本/限制
 │   ├── validation/gpu-improvements.md # G0—G2边界/热会话/合并RPC/原生批验证
+│   ├── validation/p4-cache.md # 缓存一致性/传输/审查修复与代表性实验记录
 │   ├── validation/p4-indexes.md # 双节点/重启/故障矩阵、成本及工件质量证据
 │   ├── validation/p3-faiss.md # P3 CPU 回归、隔离、召回实验与已知限制
 │   ├── superpowers/plans/2026-10-11-local-baseline.md # 执行计划与记录
