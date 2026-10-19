@@ -21,7 +21,7 @@ def cpu_artifact():
                    build_fingerprint=config.fingerprint())
     return encode_artifact(FaissIndex.build(ids, vectors, config), key, config, hasher.finish())
 
-GPU_FILES={'test_gpu_batch_probe.py','test_gpu_sessions.py','test_gpu_worker.py','test_gpu_execution.py','test_gpu_shell.py','test_gpu_quality_rpc.py','test_gpu_calibration.py','test_gpu_acceptance.py','test_gpu_benchmark.py','test_p4_gpu_restore.py'}
+GPU_FILES={'test_gpu_batch_probe.py','test_gpu_sessions.py','test_gpu_worker.py','test_gpu_execution.py','test_gpu_shell.py','test_gpu_quality_rpc.py','test_gpu_calibration.py','test_gpu_acceptance.py','test_gpu_benchmark.py','test_p4_gpu_restore.py','test_gpu_cached_reads.py'}
 
 
 @lru_cache(maxsize=1)

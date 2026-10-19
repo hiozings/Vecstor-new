@@ -20,11 +20,13 @@ from vecstor.rpc.sql_codec import encode_result
 
 
 class SQLComputeService(rpc.SQLComputeServicer):
-    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None,fused_candidates=False,index_source='local',data_cache_config=None):
+    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None,fused_candidates=False,index_source='local',data_cache_config=None,metadata_projection='full'):
         if index_source not in ('local','published'): raise ValueError('Invalid index source')
         from vecstor.cache.types import CacheConfig
         from vecstor.cache.vector_cache import VersionedVectorCache
         self.data_cache=VersionedVectorCache(data_cache_config or CacheConfig())
+        if metadata_projection not in ('full','projected'):raise ValueError('Invalid metadata projection')
+        self.metadata_projection=metadata_projection
         self.index_source = index_source
         self.server_instance_id=uuid.uuid4().hex
         self.quality_catalog=QualityCatalog.from_document(quality_document)
@@ -36,10 +38,11 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 if caps.get('index_publication_version') != 1: raise ValueError('Storage does not support published indexes')
             except Exception:
                 self.channel.close(); raise
-        if self.data_cache.config.max_bytes:
+        if self.data_cache.config.max_bytes or metadata_projection=='projected':
             try:
                 caps=json.loads(self.stub.Control(pb.ControlRequest(action='capabilities'),timeout=min(timeout,5)).json_result)
-                if caps.get('data_cache_epoch_version')!=1:raise ValueError('Storage lacks data cache epoch capability')
+                if self.data_cache.config.max_bytes and caps.get('data_cache_epoch_version')!=1:raise ValueError('Storage lacks data cache epoch capability')
+                if metadata_projection=='projected' and caps.get('data_read_version')!=1:raise ValueError('Storage lacks projected read capability')
             except Exception:
                 self.channel.close();raise
         self.timeout = timeout
@@ -99,7 +102,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 normalized=pb.SQLRequest.FromString(request.SerializeToString())
                 normalized.sql=plan.sql
                 output=execute_vector(self.stub,self.index_manager.registry,normalized,plan.vector,options,
-                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry,fused_candidates=use_fused,index_source=self.index_source,data_cache=self.data_cache)
+                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry,fused_candidates=use_fused,index_source=self.index_source,data_cache=self.data_cache,metadata_projection=self.metadata_projection)
                 deadline=min(deadline,output.pop('_data_cache_deadline',deadline))
                 output['execution_plan']['server_instance_id']=self.server_instance_id
                 output['execution_plan']['server_admission_ms']=getattr(context,'vecstor_admission_ms',None)

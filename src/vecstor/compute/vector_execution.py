@@ -18,8 +18,9 @@ from vecstor.rpc.common import RemoteError
 
 
 class TopK:
-    def __init__(self,k,query,trace):
+    def __init__(self,k,query,trace,materialize_vector=None):
         self.k,self.query,self.trace=k,query,trace
+        self.materialize_vector=materialize_vector
         self.rows=[];self.distances=np.empty(0,dtype=np.float64)
 
     def add(self,rows,vectors):
@@ -28,14 +29,20 @@ class TopK:
         started=time.monotonic()
         delta=vectors.astype(np.float64)-self.query
         distances=np.sum(delta*delta,axis=1,dtype=np.float64)
-        entries=[dict(row,vector=vector.tolist()) for row,vector in zip(rows,vectors)]
+        old_count=len(self.rows)
+        entries=([dict(row,vector=vector.tolist()) for row,vector in zip(rows,vectors)]
+                 if self.materialize_vector is None else rows)
         merged=self.rows+entries;all_distances=np.concatenate((self.distances,distances))
         selected=np.lexsort((np.asarray([r['id'] for r in merged],dtype=np.int64),all_distances))[:self.k]
-        self.rows=[merged[i] for i in selected];self.distances=all_distances[selected]
+        self.rows=[dict(merged[i]) for i in selected]
+        if self.materialize_vector is True:
+            for row,position in zip(self.rows,selected):
+                if position>=old_count:row['vector']=np.array(vectors[position-old_count],dtype='<f4',copy=True)
+        self.distances=all_distances[selected]
         self.trace['rerank_ms']+=(time.monotonic()-started)*1000
 
 
-def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None,fused_candidates=False,index_source='local',data_cache=None):
+def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None,fused_candidates=False,index_source='local',data_cache=None,metadata_projection='full'):
     started=time.monotonic()
     trace={'plan_version':1,'requested_mode':options.mode,'requested_path':options.path,
            'requested_device':options.device,'actual_device':'cpu','device_fallback_reason':None,'device_attempts':[],
@@ -57,7 +64,8 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
         lease=io.open();query=query_vector(plan.query_vector,lease.dimension).astype(np.float64)
         from vecstor.compute.data_reader import CachedLeaseReader
         from vecstor.query.read_projection import required_metadata_fields
-        reader=CachedLeaseReader(io,data_cache,required_metadata_fields(plan,False),False,
+        projected=metadata_projection=='projected'
+        reader=CachedLeaseReader(io,data_cache,required_metadata_fields(plan,projected),projected,
                                  data_cache is not None and data_cache.config.max_bytes>0)
         deadline=io.deadline
         trace['data_read_version']=1
@@ -125,12 +133,12 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                     trace['planned_fallback']=(quality_problem or reason) if options.fallback=='exact' and not forbidden else 'error'
                 output=None
             else:
-                top=TopK(plan.limit,query,trace)
+                top=TopK(plan.limit,query,trace,materialize_vector=any(source=='vector' for _,source in plan.projection) if projected else None)
                 def exact(fallback=None,known=None):
                     nonlocal top
                     if device=='gpu':device_failure('gpu_exact_fallback_'+str(fallback))
                     trace.update(candidate_data_path='separate',actual_device='cpu',actual_mode='exact',actual_path='filter-first',fallback_reason=fallback)
-                    top=TopK(plan.limit,query,trace)
+                    top=TopK(plan.limit,query,trace,materialize_vector=any(source=='vector' for _,source in plan.projection) if projected else None)
                     batches=reader.scan(request.sql) if known is None else (known[i:i+io.batch_size] for i in range(0,len(known),io.batch_size))
                     matched=0
                     for rows in batches:
@@ -226,7 +234,7 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                 trace['returned_rows']=len(top.rows)
                 types={'id':'BIGINT','category':'VARCHAR','timestamp':'BIGINT','value':'DOUBLE','vector':f'FLOAT[{lease.dimension}]','distance':'DOUBLE'}
                 output={'columns':[{'name':out,'type':types[source]} for out,source in plan.projection],
-                    'rows':[[float(distance) if source=='distance' else row[source] for _,source in plan.projection]
+                    'rows':[[float(distance) if source=='distance' else row[source].tolist() if isinstance(row[source],np.ndarray) else row[source] for _,source in plan.projection]
                             for row,distance in zip(top.rows,top.distances)],'revision':lease.revision,'affected_rows':None,
                     'execution_path':f"grpc_{trace['actual_mode']}_{trace['actual_path'].replace('-','_')}"}
         io.remaining()
