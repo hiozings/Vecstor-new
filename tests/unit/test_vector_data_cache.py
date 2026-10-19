@@ -151,3 +151,14 @@ def test_clear_database_is_scoped_and_disabled_never_allocates():
 @pytest.mark.parametrize('change',[dict(dimension=0),dict(dimension=True),dict(revision=-1),dict(revision=True),dict(storage_epoch=''),dict(dtype='float64')])
 def test_invalid_scope_rejected(change):
     with pytest.raises(ValueError):replace(SCOPE,**change)
+
+
+def test_close_releases_all_databases_and_rejects_pending_admission():
+    cache=VersionedVectorCache(CacheConfig(max_bytes=10000))
+    read(cache,[1]);read(cache,[1],scope=replace(SCOPE,database_id='other'))
+    with cache.batch(SCOPE,(2,),lambda:None) as batch:
+        cache.close()
+        result=batch.finish((2,),(2,),np.full((1,4),2,dtype='<f4'),admit=True,check=lambda:None)
+        assert result.tolist()==[[2.,2.,2.,2.]]
+    assert cache.stats('db')['process']['accounted_bytes']==0
+    with cache.batch(SCOPE,(1,),lambda:None) as batch:assert batch is None

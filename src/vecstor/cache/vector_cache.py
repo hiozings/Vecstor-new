@@ -95,7 +95,7 @@ class VersionedVectorCache:
         self._lock=RLock()
         self._entries=OrderedDict();self._scopes={}
         self._bytes=0;self._payload_bytes=0;self._generation=0
-        self._active=0;self._workspace_peak=0
+        self._active=0;self._workspace_peak=0;self._closed=False
 
     @contextmanager
     def batch(self, scope: DataScope, ids, check):
@@ -104,7 +104,7 @@ class VersionedVectorCache:
         if len(ids)*scope.dimension*4>1024**2:raise ValueError('Cache batch exceeds 1 MiB')
         check()
         with self._lock:
-            enabled=(self.config.max_bytes>0 and self._active<self.config.workspace_slots
+            enabled=(not self._closed and self.config.max_bytes>0 and self._active<self.config.workspace_slots
                      and (self._active+1)*WORKSPACE_CHARGE<=self.config.workspace_bytes)
             if enabled:
                 self._active+=1
@@ -173,3 +173,9 @@ class VersionedVectorCache:
             keys=[key for key in self._entries if key[0].database_id==database_id]
             for key in keys:self._drop(key)
             return dict(data_cache_version=1,database_id=database_id,removed=len(keys),admission_generation=self._generation)
+
+    def close(self):
+        with self._lock:
+            self._closed=True;self._generation+=1
+            self._entries.clear();self._scopes.clear()
+            self._bytes=0;self._payload_bytes=0

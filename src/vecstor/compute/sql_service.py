@@ -20,8 +20,11 @@ from vecstor.rpc.sql_codec import encode_result
 
 
 class SQLComputeService(rpc.SQLComputeServicer):
-    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None,fused_candidates=False,index_source='local'):
+    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None,fused_candidates=False,index_source='local',data_cache_config=None):
         if index_source not in ('local','published'): raise ValueError('Invalid index source')
+        from vecstor.cache.types import CacheConfig
+        from vecstor.cache.vector_cache import VersionedVectorCache
+        self.data_cache=VersionedVectorCache(data_cache_config or CacheConfig())
         self.index_source = index_source
         self.server_instance_id=uuid.uuid4().hex
         self.quality_catalog=QualityCatalog.from_document(quality_document)
@@ -33,6 +36,12 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 if caps.get('index_publication_version') != 1: raise ValueError('Storage does not support published indexes')
             except Exception:
                 self.channel.close(); raise
+        if self.data_cache.config.max_bytes:
+            try:
+                caps=json.loads(self.stub.Control(pb.ControlRequest(action='capabilities'),timeout=min(timeout,5)).json_result)
+                if caps.get('data_cache_epoch_version')!=1:raise ValueError('Storage lacks data cache epoch capability')
+            except Exception:
+                self.channel.close();raise
         self.timeout = timeout
         self.fused_candidates=fused_candidates
         if fused_candidates:
@@ -48,7 +57,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
                                                    manager.build_slot, manager.gpu_registry, manager.gpu_worker)
 
     def close(self):
-        self.index_manager.close();self.channel.close()
+        self.data_cache.close();self.index_manager.close();self.channel.close()
 
     def _remaining(self, context, deadline):
         left = deadline - time.monotonic()
@@ -90,7 +99,8 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 normalized=pb.SQLRequest.FromString(request.SerializeToString())
                 normalized.sql=plan.sql
                 output=execute_vector(self.stub,self.index_manager.registry,normalized,plan.vector,options,
-                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry,fused_candidates=use_fused,index_source=self.index_source)
+                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry,fused_candidates=use_fused,index_source=self.index_source,data_cache=self.data_cache)
+                deadline=min(deadline,output.pop('_data_cache_deadline',deadline))
                 output['execution_plan']['server_instance_id']=self.server_instance_id
                 output['execution_plan']['server_admission_ms']=getattr(context,'vecstor_admission_ms',None)
                 if plan.explain:output['rows']=[[json.dumps(output['execution_plan'],ensure_ascii=False,allow_nan=False)]]

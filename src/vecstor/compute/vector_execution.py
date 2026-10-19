@@ -24,6 +24,7 @@ class TopK:
 
     def add(self,rows,vectors):
         if not rows:return
+        self.trace['counts']['vectors_used_for_rerank']=self.trace['counts'].get('vectors_used_for_rerank',0)+len(rows)
         started=time.monotonic()
         delta=vectors.astype(np.float64)-self.query
         distances=np.sum(delta*delta,axis=1,dtype=np.float64)
@@ -34,7 +35,7 @@ class TopK:
         self.trace['rerank_ms']+=(time.monotonic()-started)*1000
 
 
-def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None,fused_candidates=False,index_source='local'):
+def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None,fused_candidates=False,index_source='local',data_cache=None):
     started=time.monotonic()
     trace={'plan_version':1,'requested_mode':options.mode,'requested_path':options.path,
            'requested_device':options.device,'actual_device':'cpu','device_fallback_reason':None,'device_attempts':[],
@@ -51,8 +52,16 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
     trace.update(index_source=index_source,index_publication_version=1 if index_source=='published' else 0,
                  published_artifact_id=None,artifact_id=None,payload_sha256=None,publication_generation=0,
                  published_index_state=None,index_load_state=None)
+    reader=None
     try:
         lease=io.open();query=query_vector(plan.query_vector,lease.dimension).astype(np.float64)
+        from vecstor.compute.data_reader import CachedLeaseReader
+        from vecstor.query.read_projection import required_metadata_fields
+        reader=CachedLeaseReader(io,data_cache,required_metadata_fields(plan,False),False,
+                                 data_cache is not None and data_cache.config.max_bytes>0)
+        deadline=io.deadline
+        trace['data_read_version']=1
+        trace['counts']['vectors_used_for_rerank']=0
         descriptor = None
         if index_source == 'published':
             descriptor = IndexPublicationManager._lease_descriptor(lease, required=False)
@@ -122,10 +131,10 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                     if device=='gpu':device_failure('gpu_exact_fallback_'+str(fallback))
                     trace.update(candidate_data_path='separate',actual_device='cpu',actual_mode='exact',actual_path='filter-first',fallback_reason=fallback)
                     top=TopK(plan.limit,query,trace)
-                    batches=io.scan(request.sql) if known is None else (known[i:i+io.batch_size] for i in range(0,len(known),io.batch_size))
+                    batches=reader.scan(request.sql) if known is None else (known[i:i+io.batch_size] for i in range(0,len(known),io.batch_size))
                     matched=0
                     for rows in batches:
-                        io.remaining();top.add(rows,io.fetch([r['id'] for r in rows]));matched+=len(rows)
+                        io.remaining();top.add(rows,reader.fetch([r['id'] for r in rows],scan=True));matched+=len(rows)
                     trace['matched_rows']=matched
 
                 def fallback(why,known=None):
@@ -137,7 +146,7 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
 
                 allowed_rows=None;allowed_map=None
                 if options.mode=='approx' and options.path=='filter-first':
-                    allowed_rows=[row for batch in io.scan(request.sql) for row in batch]
+                    allowed_rows=[row for batch in reader.scan(request.sql) for row in batch]
                     allowed_map={row['id']:row for row in allowed_rows}
                     trace['matched_rows']=len(allowed_rows)
                 if options.mode=='exact':exact()
@@ -196,10 +205,10 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                             for start in range(0,len(new),io.batch_size):
                                 ids=new[start:start+io.batch_size]
                                 if allowed_map is None and fused_candidates:
-                                    rows,vectors=io.filter_fetch(request.sql,ids)
+                                    rows,vectors=reader.filter_fetch(request.sql,ids)
                                 else:
-                                    rows=io.filter(request.sql,ids) if allowed_map is None else [allowed_map[i] for i in ids]
-                                    vectors=io.fetch([row['id'] for row in rows])
+                                    rows=reader.filter(request.sql,ids) if allowed_map is None else [allowed_map[i] for i in ids]
+                                    vectors=reader.fetch([row['id'] for row in rows])
                                 passed+=len(rows);top.add(rows,vectors)
                             matched+=passed
                             trace['counts']['candidates_checked']=len(seen)
@@ -220,12 +229,16 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                     'rows':[[float(distance) if source=='distance' else row[source] for _,source in plan.projection]
                             for row,distance in zip(top.rows,top.distances)],'revision':lease.revision,'affected_rows':None,
                     'execution_path':f"grpc_{trace['actual_mode']}_{trace['actual_path'].replace('-','_')}"}
+        io.remaining()
     finally:io.close()
+    if reader is not None:trace['data_cache']=reader.describe()
     if index_source=='published' and trace['actual_mode']=='approx':
         trace.update(artifact_id=descriptor.artifact_id,payload_sha256=descriptor.payload_sha256)
     trace['compute_elapsed_ms']=(time.monotonic()-started)*1000
     if explain is not None:
         return {'columns':[{'name':'plan','type':'VARCHAR'}],'rows':[[json.dumps(trace,ensure_ascii=False,allow_nan=False)]],
-                'revision':lease.revision,'affected_rows':None,'execution_plan':trace,'execution_path':'explain' if explain=='plan' else 'explain_analyze'}
+                'revision':lease.revision,'affected_rows':None,'execution_plan':trace,'execution_path':'explain' if explain=='plan' else 'explain_analyze',
+                '_data_cache_deadline':io.deadline}
+    output['_data_cache_deadline']=io.deadline
     output['execution_plan']=trace
     return output
