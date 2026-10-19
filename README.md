@@ -140,8 +140,8 @@ G0—G2已补强GPU候选完整性和响应校验，减少热会话能力查询�
 
 新增显式`--index-source published`，通过`.index publish`向存储发布权威CPU工件，两个计算节点分别`.index load`并按读租约绑定同一工件。支持GPU重克隆、显式启动预加载和受引用保护的回收；默认local/精确查询保持兼容。操作流程和边界见[P4索引使用说明](docs/p4-indexes.md)。索引子阶段T1—T9及正式验收已完成，见[验收记录](docs/validation/p4-indexes.md)：687项完整真实GPU回归与4项补充进程测试通过，另有1万/10万双节点、12组生命周期成本和CPU/GPU各500留出验证。数据缓存、自适应策略与增量维护仍待推进，不代表全部P4完成。
 
-## P4 数据缓存与按需传输（正式成本验收中）
+## P4 数据缓存与按需传输
 
 可通过`--data-cache-mib 64`启用计算侧有界原始向量缓存，`--metadata-projection projected`仅回传需要的元数据；缓存、字段投影和既有fused路径独立开关。请求级使用`SETTINGS data_cache='on', metadata_projection='projected'`，终端用`.cache stats`查看、`.cache clear`清理所选库的数据缓存。默认缓存关闭；exact扫描默认只查不填，允许扫描预热需显式`--data-cache-scan-admission on`。
 
-操作及资源/版本边界见[缓存说明](docs/p4-cache.md)，实际回归与代表性实验范围见[缓存验收](docs/validation/p4-cache.md)。审查修复后的完整真实GPU回归838项通过；代表性成本验收仍在进行，不代表完整200查询矩阵已经执行。
+操作及资源/版本边界见[缓存说明](docs/p4-cache.md)，实际回归与代表性实验范围见[缓存验收](docs/validation/p4-cache.md)。审查修复后的完整真实GPU回归838项通过；代表性38场景、CPU/GPU共630次配置和33744条计时查询通过。缓存显著减少部分暖态传输，但也有CPU延迟退化，详见验收记录；完整200查询矩阵未运行，自适应策略和增量维护仍待推进。

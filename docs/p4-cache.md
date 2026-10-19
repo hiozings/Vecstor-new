@@ -1,6 +1,6 @@
 # P4 有界数据缓存与按需传输
 
-状态：T1—T7已接入并验证；代表性成本、最终回归与独立审查仍在T8进行，尚未宣告本子阶段完成。设计见[缓存与传输设计](design/p4-data-cache-and-transfer.md)，实施记录见[八任务计划](superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)。
+状态：T1—T8已按用户选择的代表性实验范围完成。审查修复后838项完整真实GPU回归、630次配置/33744条计时查询通过；性能收益和退化见[验收记录](validation/p4-cache.md)。设计见[缓存与传输设计](design/p4-data-cache-and-transfer.md)，实施记录见[八任务计划](superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)。
 
 ## 启动与请求控制
 
@@ -42,7 +42,7 @@ SETTINGS data_cache='off', metadata_projection='full';
 | --data-cache-max-entries | 65536 | 与容量同时限制 |
 | --data-cache-scan-admission | off | exact全量扫描默认只查缓存不填充；on用于允许扫描预热 |
 | --metadata-projection | full | projected只返回所需元数据，SELECT *仍含全部列 |
-| data_cache | default | 请求级default/off/on，off不查不写缓存 |
+| data_cache | default | 请求级default/off/on，off不进行向量缓存lookup/填充，仍读取用量统计 |
 | metadata_projection | default | 请求级default/full/projected |
 
 projected不会省去距离计算必需的向量，也不减少WHERE必须读取的过滤字段。fused在开启缓存或projected时只返回未命中且通过过滤的向量；即使全部命中，仍远程执行过滤和全部候选存在性校验。旧关闭/full/fused路径保留。
@@ -72,3 +72,5 @@ python benchmarks/p4/data_reads.py --output-dir results/p4-data-reads-new --tier
 ```
 
 目录必须不存在，失败保留report及已执行证据，finally回收进程。完整实验入口为correctness/costs/gpu；代表性矩阵不等同于完整200查询矩阵。实验流程、样本及局限见[实验说明](../benchmarks/p4/README.md)。
+
+已知非阻断成本：每请求describe的用量统计目前会在锁内遍历缓存条目；部分CPU暖态即使省去向量RPC仍出现延迟退化。默认不自动开启优化，后续优先评估常数时间统计快照，不能把传输减少等同于普遍提速。

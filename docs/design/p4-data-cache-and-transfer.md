@@ -1,6 +1,6 @@
 # P4 有界数据缓存与传输优化设计
 
-日期：2026-10-19。状态：**实施中：T1—T6已接入，T7—T8正式生命周期与成本验收待完成**。初始规划轮交付设计与实施计划；2026-10-19起按用户授权逐任务实施，不新增依赖。实施入口见[八任务计划](../superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)。
+日期：2026-10-19。状态：**T1—T8按代表性实验范围完成，见[验收记录](../validation/p4-cache.md)**。初始规划轮交付设计与实施计划；2026-10-19起按用户授权逐任务实施，不新增依赖。实施入口见[八任务计划](../superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)。
 
 ## 1. 目标与范围
 
@@ -76,7 +76,7 @@ BeginRead新增`effective_ttl_seconds`，由存储返回实际授予TTL。计算
 
 ## 5. 容量、所有权与并发
 
-配置拟定：`--data-cache-mib 0`默认关闭；显式开启建议64MiB；`--data-cache-max-entries 65536`；`--data-cache-scan-admission off|on`默认off。与CPU索引256MiB、GPU预算独立，报告总RSS；不自动挪用索引预算。
+已实现配置：`--data-cache-mib 0`默认关闭；显式开启建议64MiB；`--data-cache-max-entries 65536`；`--data-cache-scan-admission off|on`默认off。与CPU索引256MiB、GPU预算独立，报告总RSS；不自动挪用索引预算。
 
 记录保存独立复制的不可变`bytes`，一条恰为dimension×4，不保存整个RPC缓冲区的view，以免一行引用挂住1MiB。LRU按记录淘汰，读/写命中更新顺序。记账契约为每活跃scope1024字节、每记录512字节管理额度加payload字节；同时限制条目数。名称使用`accounted_bytes`而非实际RSS；这些固定管理额度是可复现预算模型，不是Python allocator精确硬限。空scope立即删除。128维、64MiB默认建议值最多约65535行（还需scope开销）；10万行全驻留需约97.7MiB，不能称64MiB容纳10万行。
 
@@ -88,7 +88,7 @@ BeginRead新增`effective_ttl_seconds`，由存储返回实际授予TTL。计算
 
 exact的全量scan默认允许lookup但禁止新插入，避免一次顺序扫描挤掉热点；filter-first ANN和search-first的实际重排向量可插入。显式scan-admission=on用于exact冷暖实验；此选项不影响答案。索引构建快照、publish/load/preload不填充数据缓存，也不从缓存替代发布收据。
 
-清理拟提供计算服务本地`.cache stats`、`.cache clear`，要求已选库，仅清该database_id；不修改存储/索引/数据revision。返回process总容量及选库占用，不能混称选库容量。clear递增全局admission_generation；正在下载的旧代次结果仍可服务当前请求，但不得重新填充缓存。该保守代次会使其他库在途插入也跳过一次，避免维护无界库代次表。进程重启自然为空，双节点各自管理。
+清理提供计算服务本地`.cache stats`、`.cache clear`，要求已选库，仅清该database_id；不修改存储/索引/数据revision。返回process总容量及选库占用，不能混称选库容量。clear递增全局admission_generation；正在下载的旧代次结果仍可服务当前请求，但不得重新填充缓存。该保守代次会使其他库在途插入也跳过一次，避免维护无界库代次表。进程重启自然为空，双节点各自管理。
 
 ## 6. 读取和字段传输
 
@@ -120,7 +120,7 @@ TopK在各批挑出保留项后仅保留K行需要的metadata/距离。只有投
 
 新候选响应过4MiB时，只对明确`projected_response_too_large`做有界二分拆分，最多1024输入带来的11层，保留顺序。单ID仍超限明确RESOURCE_EXHAUSTED，不无限重试。新扫描RPC按实际ByteSize拆帧，同时满足行上限；单行超限明确失败。旧RPC行为不变。
 
-## 7. 协议与控制面（均为拟新增）
+## 7. 协议与控制面（已实现）
 
 只在sql.proto增加字段/消息/RPC，旧字段语义不变，运行generate_proto.py同步四个生成模块。
 
@@ -133,7 +133,7 @@ TopK在各批挑出保留项后仅保留K行需要的metadata/距离。只有投
 - 存储capabilities新增`data_read_version=1`、`data_cache_epoch_version=1`；计算GetSearchCapabilities新增`data_cache_version=1`、`metadata_projection_version=1`、cache配置/可用状态。新RPC请求不得依赖服务端忽略未知字段来“兼容”。
 - SQLCompute新增GetDataCacheStats/ClearDataCache（请求database_id，响应沿用ControlResponse JSON），不透传存储Control。CLI为`.cache stats|clear`。
 
-启动参数`--metadata-projection full|projected`默认full；缓存是否默认打开由data-cache-mib>0决定。逐请求off不查不写缓存；on在配置容量0时拒绝；default继承启动配置。显式full覆盖启动projected。会话`.search`及SQL SETTINGS支持同名字符串选项；`.search reset`清选项，不清缓存。拟例：`SETTINGS data_cache='on', metadata_projection='projected'`。
+启动参数`--metadata-projection full|projected`默认full；缓存是否默认打开由data-cache-mib>0决定。逐请求off不查不写缓存；on在配置容量0时拒绝；default继承启动配置。显式full覆盖启动projected。会话`.search`及SQL SETTINGS支持同名字符串选项；`.search reset`清选项，不清缓存。示例：`SETTINGS data_cache='on', metadata_projection='projected'`。
 
 启动配置或请求显式需要新能力而存储不支持时明确拒绝，不静默全字段或无缓存。纯旧路径继续工作。客户端按server_instance_id复用能力并检查向量完成帧确认；若旧计算服务忽略新选项，拒绝成功。普通SQL不能因会话开启缓存而被错误要求向量完成帧确认。
 
@@ -148,6 +148,8 @@ TopK在各批挑出保留项后仅保留K行需要的metadata/距离。只有投
 EXPLAIN只取得租约/索引和配置，缓存不得lookup/touch/insert/clear，不改变LRU；预测命中率标为unknown。ANALYZE只执行一次。输出实际requested/effective/cache bypass；设备、质量和精确回退的既有字段完整保留。
 
 ## 9. 验收矩阵
+
+2026-10-19用户选择代表性正式实验。本节完整200查询矩阵保留为复现规格，未全部执行；实际代表性38场景/630次配置/33744查询及838项完整回归见验收记录，不能将其表述为全矩阵通过。
 
 | 编号 | 必须证明的行为 |
 | --- | --- |
@@ -185,4 +187,4 @@ GPU只选原有支持且冻结质量配置可应用的search-first负载，至�
 
 原始向量缓存会与CPU/GPU索引重复内存；64MiB只是建议起点，验收必须报告全部驻留资源。每行LRU的Python开销和锁复制可能抵消小批收益；不先引入分片、复杂策略或跨请求等待。按需字段无法消除存储的WHERE读取或现有全量元数据物化。fused选择性读取可能增加SQL执行成本，保留原路径并精确归因。
 
-本设计沿用可信网络、单存储进程，无新增鉴权或离线服务承诺。业务实现前审阅本提案及计划；任何扩大到缓存过滤结果、自动切路径、共享内存或后台预热的改动都需更新范围与验收。
+本设计沿用可信网络、单存储进程，无新增鉴权或离线服务承诺。当前实现已完成；任何扩大到缓存过滤结果、自动切路径、共享内存或后台预热的改动都需更新范围与验收。

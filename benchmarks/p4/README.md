@@ -39,7 +39,7 @@ verifier峰值使用exec后`/proc/self/status`的VmHWM，同时保留原始ru_ma
 
 2026-10-18正式结果及最终回归/故障矩阵见[P4验收记录](../../docs/validation/p4-indexes.md)。原始成本版本与后续审查修复版本分别记录，不把测量前的耗时当作最终修复后重测。
 
-## 数据缓存与字段传输（T8验收中）
+## 数据缓存与字段传输（代表性验收完成）
 
 ```bash
 python benchmarks/p4/data_reads.py --output-dir results/p4-data-smoke --tier smoke
@@ -60,3 +60,5 @@ python benchmarks/p4/data_reads.py --output-dir results/p4-data-gpu --tier gpu \
 延迟由测试专用loopback代理在读取RPC转发前/首响应前各加固定时延，后续stream帧不重复延迟，不模拟带宽/拥塞；同时保留0ms代理对照和BeginRead实测往返（含存储执行）。代理与实验驱动共进程，资源字段明确包含驱动开销，不冒充纯代理CPU。网络字节仍为Protobuf序列化字节。
 
 资源每5ms采样；compute为新进程，storage在同数据组中复用，storage CPU字段是累计进程生命周期值，不能直接解释为单变体CPU开销。缓存记账峰值为查询完成时采样，工作区峰值来自服务计数；不是物理RSS硬限。未执行的完整tier在报告标NOT_RUN。
+
+最终838项完整回归及代表性630次配置/33744查询通过，运行时源码9362353；完整收益、退化、资源口径和未跑项见[缓存验收记录](../../docs/validation/p4-cache.md)。原始报告位于results/p4-cache-data-cpu-20261019-final和gpu对应目录；汇总脚本/表格在results/p4-cache-final-20261019。

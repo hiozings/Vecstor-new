@@ -1,6 +1,6 @@
 # P4 有界数据缓存与传输优化验收（2026-10-19）
 
-状态：最终完整回归838项通过；修复后代表性实验进行中。T1—T7已验证；本页只在证据完整后更新为完成，不把审查前实验当作最终版本结果。
+状态：**缓存与传输子阶段T1—T8按用户选择的代表性实验范围完成**。审查修复后完整回归838项通过；CPU/GPU代表性38场景、630次配置、33744条计时查询全部通过。原完整200查询矩阵仍未运行。
 
 ## 范围和环境
 
@@ -8,7 +8,7 @@
 
 用户已明确选择本轮运行**代表性正式矩阵**，保留完整correctness/costs/gpu入口。未执行原200查询全矩阵，不能据此宣布全部实验空间或整个P4完成；自适应策略、增量索引维护、跨节点缓存同步仍未实现。
 
-环境沿用[迁移记录](../environment.md)：Conda vecstor、锁定Python/Faiss/DuckDB/gRPC、RTX4060 Laptop，未安装新依赖或改驱动。所有回归/实验清除PYTHONPATH；真实GPU检查不以CPU-only替代。实现分支codex/p4-data-cache-transfer；审查修复业务/实验版本为9362353。
+硬件为Intel Core i9-14900HX（32逻辑CPU）、RTX4060 Laptop 8188MiB、驱动615.78.08、CachyOS Linux7.2.9-2；任务结束后的只读环境快照在results/p4-cache-final-20261019/environment.json。环境沿用[迁移记录](../environment.md)：Conda vecstor、锁定Python/Faiss/DuckDB/gRPC、RTX4060 Laptop，未安装新依赖或改驱动。所有回归/实验清除PYTHONPATH；真实GPU检查不以CPU-only替代。实现分支codex/p4-data-cache-transfer；审查修复业务/实验版本为9362353。
 
 ## 证据入口
 
@@ -18,7 +18,9 @@
 | results/p4-cache-100k-20261019 | 5f546c4生命周期：24项判据通过，60.38秒，无残留进程 |
 | results/p4-cache-gpu-20261019 | 5f546c4生命周期：26项判据通过，10.94秒，真实GPU和工件拒读，无残留进程 |
 | results/p4-cache-data-gpu-20261019 | 审查前bee1270：48次配置/1920计时查询通过，267.93秒；保留历史，不作为最终修复版本结果 |
-| results/p4-cache-final-20261019 | 最终完整回归、C01—C15证据索引和代表性实验汇总（进行中） |
+| results/p4-cache-data-cpu-20261019-final | 9362353：582次配置、31824条计时查询通过，2223.60秒，无跳过/残留进程 |
+| results/p4-cache-data-gpu-20261019-final | 9362353：48次配置、1920条计时查询通过，271.05秒，无跳过/残留进程 |
+| results/p4-cache-final-20261019 | 838项完整回归、C01—C15索引、summary.json、完整汇总表及原始记录核对脚本 |
 
 首次正式入口因scripts/vecstor.py遮蔽包，在创建实验目录之前失败；独立CLI测试复现并按现有脚本的源码路径引导方式修复。未通过设置PYTHONPATH掩盖问题。审查前阶段全套819通过（354.97秒）；这也不是最终HEAD完整回归。
 
@@ -30,13 +32,13 @@ env -u PYTHONPATH OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECSTOR_REQUIRE_GPU=1
   --junitxml=results/p4-cache-final-20261019/pytest.xml
 ```
 
-最终完整回归 **838通过，414.25秒，零失败/零跳过**。其JUnit已核对上述用例；C15仍须等待正式实验完成，不以工具smoke测试代替性能证据。
+最终完整回归 **838通过，414.25秒，零失败/零跳过**。其JUnit已逐项核对下表用例；正式报告和逐查询原始记录另经summarize.py核对630个配置组合、33744条equivalent记录、零incomplete及全部缓存记账上限。两个最终实验的源码SHA集合与回归冻结集合完全相同。
 
 协议已通过独立临时目录重新生成并逐字节核对四个生成文件；正式业务源码不被此检查改写。
 
 ## C01—C15证据映射
 
-矩阵最终须由真实JUnit和正式报告确认；以下列出判据与对应测试，不能只凭测试名认为已经通过。
+以下C01—C14均由最终JUnit和注明版本的生命周期报告确认通过；C15按用户授权的代表性范围通过。机器可读索引为results/p4-cache-final-20261019/acceptance-matrix.json。
 
 | 编号 | 判据 | 主要测试/脚本 |
 | --- | --- | --- |
@@ -54,7 +56,7 @@ env -u PYTHONPATH OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECSTOR_REQUIRE_GPU=1
 | C12 | 扫描准入、两ANN路径与精确回退 | test_exact_scan_lookup_only_and_admission_switch；test_exact_warm_scan_with_sufficient_capacity；既有P3两路径/候选预算回归；代表性correctness-probe |
 | C13 | EXPLAIN/ANALYZE、请求统计与能力 | test_explain_never_touches_cache_and_analyze_executes_once；test_parallel_request_stats_do_not_use_global_deltas；test_lazy_storage_capability_rpc_is_accounted；test_cache_completion_ack_and_instance_invalidation |
 | C14 | PTY、独立节点、Landlock、真实GPU | test_cache_acceptance_real_terminal_nodes_and_restarts；test_gpu_cached_projected_fused_and_cpu_fallback；三个正式生命周期报告 |
-| C15 | 独立开关、配对实验和真实资源 | test_data_read_smoke_pairs_variants_and_keeps_raw_resources；test_proxy_preserves_read_responses_and_delay；最终代表性CPU/GPU报告（进行中） |
+| C15 | 独立开关、配对实验和真实资源 | test_data_read_smoke_pairs_variants_and_keeps_raw_resources；test_proxy_preserves_read_responses_and_delay；test_full_hotset_contains_160_requests_across_all_twenty_hot_queries；最终代表性CPU/GPU报告（通过，完整tier仍NOT_RUN） |
 
 同revision恢复的exact测试证明原始数据缓存隔离；不把它用作仍驻留local ANN的恢复证明。正常published恢复要求数据库和权威工件来自一致备份。进程重启与注入故障不等同于断电耐久性证明。
 
@@ -72,11 +74,71 @@ RPC字节为实际Protobuf序列化大小；命中向量裸字节推算单列，
 
 RSS/CPU每5ms采样，可能漏峰。新compute进程的资源可按变体观察；storage跨变体复用，其CPU值为累计生命周期计数，不直接当作变体CPU差。代理和实验驱动共进程，资源项明确含驱动成本。缓存记账容量和工作区预算不是整个进程RSS硬限。
 
-正式结果将在修复后CPU/GPU报告都完成后写入本节；不提前采用审查前GPU结果填充最终表格。
+### 最终结果：减少传输，不代表所有负载更快
+
+以下均为warm阶段；P50/P95是三次重复各自分位数再取中位数，字节/RPC是按实际请求数加权平均。20查询成本组只有20个不同输入、重复三次，分位数为描述性结果，不声称统计显著或普遍提速。完整六种对照汇总见results/p4-cache-final-20261019/summary-tables.md，所有八种组合原始记录仍保留。
+
+CPU：10万行、独立分布、100%通过率、K10。每格P50/P95，单位ms：
+
+| 并发 | off/full/separate | on/full/separate | on/projected/separate | off/full/fused | on/projected/fused |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 32.57 / 48.64 | 36.96 / 47.74 | 36.49 / 44.40 | 42.71 / 55.57 | 29.13 / 46.52 |
+| 4 | 61.82 / 82.11 | 40.29 / 67.71 | 40.06 / 49.21 | 112.47 / 147.19 | 38.99 / 57.91 |
+| 8 | 113.93 / 119.59 | 89.59 / 111.87 | 83.26 / 104.63 | 212.11 / 232.62 | 92.76 / 112.99 |
+
+对应separate路径，缓存关闭/full为4 RPC、39456存储Protobuf字节/请求；缓存开启/full为3 RPC、6195字节；缓存开启/projected为3 RPC、4412字节，三种并发下warm向量读取均从64行降为0。串行cache/full的P50仍从32.57升至36.96ms；减少RPC或字节不能保证延迟下降。fused旧路径与selective新路径的SQL读取形态不同，不能把其差异全部归因于网络往返。
+
+GPU：10万行、独立分布、并发1，两个冻结支持负载：
+
+| 通过率/K | 配置 | P50/P95 ms | RPC/请求 | 存储Protobuf字节/请求 |
+| --- | --- | ---: | ---: | ---: |
+| 100%/100 | off/full/separate | 41.85 / 55.79 | 4 | 75112 |
+| 同上 | on/full/separate | 38.55 / 48.51 | 3 | 8723 |
+| 同上 | on/projected/separate | 35.29 / 48.36 | 3 | 5147 |
+| 同上 | on/projected/fused | 42.57 / 48.59 | 3 | 5147 |
+| 10%/10 | off/full/separate | 43.82 / 50.76 | 4 | 19105 |
+| 同上 | on/full/separate | 40.49 / 53.51 | 3 | 5962 |
+| 同上 | on/projected/separate | 39.12 / 44.90 | 3 | 5266 |
+| 同上 | on/projected/fused | 41.96 / 50.86 | 3 | 5921 |
+
+缓存开启后上述warm向量读取均为0。窄过滤fused的lookup命中率约0.0982，因为查找分母包含最终未通过WHERE的候选；这不等于只有9.82%的实际重排向量来自缓存。两个完整500留出工件验证平均Recall@K分别为100%/K100的0.98266、10%/K10的0.98560，均无精确回退/不完整；成本阶段v3质量配置实际应用。它们不是全部GPU负载覆盖或逐查询召回保证。
+
+### 容量与延迟边界
+
+CPU10万行、K100、projected/separate、并发1；每阶段200查询，三次重复：
+
+| 容量/缓存 | warm P50/P95 ms | 读取向量/请求 | lookup命中率 | warm淘汰总数（3次） |
+| --- | ---: | ---: | ---: | ---: |
+| 8MiB/off | 54.44 / 69.54 | 400 | — | 0 |
+| 8MiB/on | 63.51 / 86.29 | 324.39 | 0.1890 | 194637 |
+| 64MiB/off | 56.83 / 74.94 | 400 | — | 0 |
+| 64MiB/on | 63.03 / 84.34 | 0 | 1.0000 | 0 |
+
+8MiB最终8191条、记账8388608字节；64MiB最终42785条、记账43812864字节（约41.78MiB）。64MiB可容纳这组ANN热工作集，warm存储字节由215478降为8280/请求，但P50仍退化。每条查询的全缓存统计遍历、逐行复制和锁操作是潜在成本，当前没有独立消融把退化全部归因于其中某一项。exact全表扫描的工作集更大，不能从ANN热工作集推断64MiB能容纳整个10万行表；产品默认exact不填缓存。
+
+延迟代理组固定10万行、K10、projected/separate、并发1：
+
+| 注入单向时延 | off warm P50/P95 ms | on warm P50/P95 ms | BeginRead往返中位数ms |
+| --- | ---: | ---: | ---: |
+| 0ms | 50.20 / 75.81 | 49.64 / 64.42 | 3.55 |
+| 1ms | 61.88 / 72.31 | 51.39 / 66.40 | 7.87 |
+| 5ms | 110.96 / 116.97 | 86.65 / 91.74 | 19.32 |
+
+注入组都经同一代理，0ms代理并非直连，因此不把它与直接连接的P50差异归因于缓存。RPC字节统计仍是计算端逻辑存储调用，不把代理下游重复传输相加冒充网卡流量。相同200-query完整延迟矩阵未运行。
+
+### 资源、回退与未覆盖范围
+
+CPU各配置compute采样峰值范围216.2—432.5MiB、storage353.1—506.3MiB；GPU对应compute393.6—430.4MiB、storage423.9—439.3MiB、GPU worker705.3—707.6MiB。整卡显存采样最大766.9MiB（包含桌面等程序）。新增批工作区最大记账16MiB，全部缓存记账检查未超配置上限。
+
+这里是每配置采样峰值的范围，不能相加为同步峰值。采样不含此前导入/构建/参考校验的全部峰值，GPU worker在加载取得PID后才监测；不能与索引生命周期的全程峰值直接比较。每个配置仅一个计算进程，多会话并发1/4/8；双节点一致性另由生命周期验收证明，不用本表宣称双节点吞吐扩展。
+
+33744条计时查询中有960条请求approx但实际精确回退，均来自低选择性search-first组；这些不是纯ANN性能样本。所有配置与关闭优化的冻结基线答案/实际模式相同，过滤与float64距离一致，零不完整结果。exact/filter-first探针每阶段仅1条查询，不输出P95、不作为广泛延迟结论。
+
+未运行：原全部200查询correctness/costs/gpu tier，特别是1%/50%过滤率的正式成本组合、更广泛GPU并发/查询集合，以及真实跨机、带宽/拥塞和冷OS页缓存实验。主成本只有20条不同查询、三次重复；容量组200条不能替代其他组样本。变体顺序随机化但场景按固定顺序运行，仍有调度、热状态及时间漂移限制。保持默认关闭，不根据这些结果自动启用全部优化。
 
 ## 审查修复、取舍及待优化项
 
-一次独立只读审查：无Critical，指出projected separate大响应缺少二分。该问题及协议标记、热点生成偏差均已先失败复现后修复，27项定向验证通过。后两项按实际研究影响提升为必须修复：不能把新RPC标成legacy，也不能把16热点负载称为20热点。
+一次独立只读审查：无Critical，1项Important和3项Minor；其中projected separate大响应缺少二分为功能问题。该问题及协议标记、热点生成偏差均已先失败复现后修复，27项定向及后续838项完整回归通过，未追加第二次独立审查。后两项按实际研究影响提升为必须修复：不能把新RPC标成legacy，也不能把16热点负载称为20热点。
 
 保留一项非阻断优化：每请求describe仍为了process计数调用完整选库stats，在全局锁内遍历缓存；最终实验包含此开销。后续可增加常数时间process快照，不在本轮隐藏这项潜在退化。
 

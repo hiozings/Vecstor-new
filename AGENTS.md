@@ -11,7 +11,7 @@
 - 依据：`README.md` 与 `项目申报书2.pdf`。
 - 申报实施周期：2026-01-01 至 2026-12-31。
 - 预期成果：一套可运行的混合查询存算分离向量数据引擎原型，以及包含架构设计、优化方案和性能测试的结题报告。
-- 已建立 Conda `vecstor` 环境；P1 本地基线、P2 gRPC 服务和 P2.5 交互式 SQL、运行时选库、持久 CRUD 已实现。P2.5 通过真实终端、P1 对照、重启及 Landlock 验收；P3 CPU ANN、双路径、候选扩展和计划展示已实现，通过 427 项回归、1 万行真实终端/Landlock 及 360 次规模实验。GPU ANN search-first 已接入，P4权威索引持久发布、双节点加载及重启恢复已完成，增量维护与数据缓存优化仍待实现。
+- 已建立 Conda `vecstor` 环境；P1 本地基线、P2 gRPC 服务和 P2.5 交互式 SQL、运行时选库、持久 CRUD 已实现。P2.5 通过真实终端、P1 对照、重启及 Landlock 验收；P3 CPU ANN、双路径、候选扩展和计划展示已实现，通过 427 项回归、1 万行真实终端/Landlock 及 360 次规模实验。GPU ANN search-first 已接入，P4权威索引持久发布、双节点加载/重启恢复及有界数据缓存/按需传输子阶段已完成，自适应策略与增量维护仍待实现。
 - 以下排期按 2026-10-10 起剩余约 12 周制定。若存在其他位置的代码或学校提前验收，应先核实再更新排期。
 
 ## 2. 目标与范围
@@ -117,9 +117,9 @@ GPU ANN 已按计划接入：SQL SETTINGS逐请求选择CPU/GPU、显式GPU副�
 
 GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复用查询能力并拆分计时，提供可选候选过滤/向量合并RPC（默认关闭、SQL可覆盖）。原生batch1/4/8探测完成；native占比低且GPU排队短，本轮不部署运行时批调度、批内取消或二进制IPC。自动策略/GPU覆盖扩展仍留给G3—G5；持久版本已由P4索引子阶段接入。见 [改进验收](docs/validation/gpu-improvements.md)、[问题分析](docs/design/gpu-improvement-analysis.md) 和 [执行计划](docs/superpowers/plans/2026-10-15-gpu-improvements.md)。
 
-P4索引子阶段T1—T9已于2026-10-18完成：[设计](docs/design/p4-index-publication.md)、[实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)、[使用说明](docs/p4-indexes.md)、[验收记录](docs/validation/p4-indexes.md)。计算侧显式构建，存储校验/落盘/目录原子发布，读租约绑定权威工件，双计算节点RPC加载；支持批量写入后完整重建、零训练重启、GPU重克隆、v3工件质量绑定及引用保护GC。最终不设置PYTHONPATH的真实GPU完整回归687通过，另补4项进程验收通过；1万/10万规模、12组生命周期成本和CPU/GPU各500条冻结留出验证通过。审查补齐目录同步重试、DROP表回收与上传清理重试。保持数据库级revision；数据缓存、自适应策略、表级版本与增量维护尚未实现，不代表全部P4完成。
+P4索引子阶段T1—T9已于2026-10-18完成：[设计](docs/design/p4-index-publication.md)、[实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)、[使用说明](docs/p4-indexes.md)、[验收记录](docs/validation/p4-indexes.md)。计算侧显式构建，存储校验/落盘/目录原子发布，读租约绑定权威工件，双计算节点RPC加载；支持批量写入后完整重建、零训练重启、GPU重克隆、v3工件质量绑定及引用保护GC。最终不设置PYTHONPATH的真实GPU完整回归687通过，另补4项进程验收通过；1万/10万规模、12组生命周期成本和CPU/GPU各500条冻结留出验证通过。审查补齐目录同步重试、DROP表回收与上传清理重试。该索引子阶段保留数据库级revision；数据缓存进度见下文，自适应策略、表级版本与增量维护仍待推进，不代表全部P4完成。
 
-P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/design/p4-data-cache-and-transfer.md)及[八任务实施计划](docs/superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)，T1—T7已实现：有界内核、epoch/TTL、投影/选择性RPC、separate/fused缓存与用户开关已接入，审查修复后完整838项真实GPU回归通过；1万/10万/GPU隔离生命周期24/24/26项通过；独立审查及修复完成，T8最终版本代表性正式成本仍在运行。用户选择保留全量实验入口，本轮只执行代表性正式矩阵。拟采用计算侧按storage epoch/数据库/表/revision隔离的有界原始向量缓存、miss批量读取、按需元数据与选择性fused返回；默认关闭，缓存/字段投影/合并路径独立消融。保留每请求读租约与存储过滤，明确缓存逻辑容量、临时工作区和实际RSS的区别；自适应策略、增量维护与过滤结果缓存仍后置。缓存/投影命令已接入但正式交付尚未验收，不代表缓存子阶段完成。
+P4数据缓存与传输优化子阶段T1—T8已于2026-10-19按代表性实验范围完成：[设计](docs/design/p4-data-cache-and-transfer.md)、[计划](docs/superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)、[使用说明](docs/p4-cache.md)、[验收](docs/validation/p4-cache.md)。实现epoch/revision隔离的有界原始向量LRU、miss批读、按需元数据及选择性fused、独立启动/会话/SQL开关和用量/清理接口；默认关闭，保留每请求租约与存储过滤。审查修复后完整真实GPU且无PYTHONPATH回归838通过；代表性38场景/630次配置/33744计时查询通过，CPU/GPU源码SHA与回归一致。传输减少不保证延迟下降，CPU部分串行/容量组有退化；每查询统计遍历为非阻断待优化项。完整200查询矩阵未运行，全部复现入口保留；自适应策略、表级版本、增量维护及过滤结果缓存仍后置，不代表全部P4完成。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -158,9 +158,9 @@ P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/
 │   ├── check_p4_indexes.py # 双计算节点持久工件、重启与隔离生命周期验收
 │   └── generate_proto.py # 生成协议 Python 模块
 ├── proto/vecstor/rpc/services.proto # P2 v1 协议源文件
-├── proto/vecstor/rpc/sql.proto # v2 目录/SQL/读租约与 P3 快照导出/索引/计划协议
+├── proto/vecstor/rpc/sql.proto # v2 SQL/租约、P3检索及P4工件发布/缓存投影读取协议
 ├── src/vecstor/
-│   ├── cache/            # 有界版本向量LRU、独立字节所有权及批内工作区（已接入v2向量查询，正式验收待T7—T8）
+│   ├── cache/            # 有界版本向量LRU、独立字节所有权及批内工作区（已通过代表性验收）
 │   ├── __init__.py
 │   ├── __main__.py       # console-script 与 shell/serve/旧命令路由
 │   ├── data.py           # 数据与向量校验、只读数组副本
@@ -172,7 +172,7 @@ P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/
 │   ├── compute/          # P2 RemoteEngine、v2路由/执行、lease_io/index_manager与index_publication/index_recovery显式发布加载及预热
 │   ├── index/            # CPU工件格式/摘要校验、GPU worker/副本、CPU IVF、快照键、有界registry与构建进程
 │   ├── rpc/              # v1/v2 协议、能力缓存会话客户端、timing接入计时、类型化结果、生命周期和验收
-│   ├── shell/            # app/buffer/commands/index_commands/render/completion：交互界面、索引生命周期与分句
+│   ├── shell/            # app/buffer/commands/index_commands/cache_commands/render/completion：SQL终端与索引/缓存控制
 │   └── query/
 │       ├── __init__.py
 │       ├── parser.py     # SQL AST 白名单、参数化过滤计划
@@ -187,7 +187,7 @@ P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/
 │   ├── calibrate.py      # 独立校准/留出、带簇负载、冻结配置与恢复运行
 │   └── validate_quality.py # 冻结参数 RPC 对照及实际快照绑定
 ├── benchmarks/gpu/       # calibrate/run质量校准与RPC；sessions热会话/合并RPC对照；batch_probe原生批探测
-├── benchmarks/p4/        # 已发布工件v3质量验证与生命周期/并发/资源成本，正式成本与质量证据已归档
+├── benchmarks/p4/        # 工件v3质量、索引生命周期及缓存传输配对/资源消融
 ├── configs/quality/       # 质量配置示例，绑定实际快照而非通用默认参数
 ├── tests/
 │   ├── support/          # 测试专用透明延迟代理，不进入生产服务
@@ -200,13 +200,13 @@ P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/
 │   ├── sql-shell.md      # P2.5 安装入口、界面、SQL 范围与使用方法
 │   ├── gpu-search.md     # GPU SQL、设备/资源、质量和故障说明
 │   ├── p3-search.md      # ANN 命令、资源/版本语义与实验复现
-│   ├── p4-cache.md       # 缓存/投影启动、会话控制、统计及限制（正式成本验收中）
+│   ├── p4-cache.md       # 缓存/投影启动、会话控制、统计及限制（代表性验收完成）
 │   ├── p4-indexes.md     # 持久工件发布/加载、双节点、重启预热与回收
 │   ├── design/data-and-query-spec.md # P1 数据与查询契约
 │   ├── design/p2-grpc.md  # P2 协议、快照与隔离设计
 │   ├── design/interactive-sql-shell.md # P2.5 终端与可写数据库设计
 │   ├── design/p3-faiss-execution.md # P3 索引、两路径与计划展示设计
-│   ├── design/p4-data-cache-and-transfer.md # 有界向量缓存/字段传输设计提案（未实施）
+│   ├── design/p4-data-cache-and-transfer.md # 有界向量缓存/字段传输设计与验收边界
 │   ├── design/p4-index-publication.md # P4索引工件/发布/双节点/恢复设计与实施边界（索引子阶段完成）
 │   ├── design/gpu-improvement-analysis.md # GPU不足、补充探测与改进优先级
 │   ├── design/gpu-ann-execution.md # GPU ANN 与 SQL 设备选择设计
@@ -226,7 +226,7 @@ P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/
 │   ├── superpowers/plans/2026-10-12-interactive-sql-shell.md # P2.5 执行计划与完成记录
 │   ├── superpowers/plans/2026-10-13-p3-faiss.md # P3 六任务实施计划
 │   ├── superpowers/plans/2026-10-15-gpu-improvements.md # GPU G0—G2实施记录与G3—G5待办
-│   ├── superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md # 缓存与传输八任务实施计划（未实施）
+│   ├── superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md # 缓存与传输八任务实施记录（代表性范围完成）
 │   ├── superpowers/plans/2026-10-16-p4-index-publication.md # P4索引子阶段九任务计划与验收矩阵（已完成）
 │   ├── superpowers/plans/2026-10-15-gpu-ann.md # GPU 六阶段实施记录
 │   ├── superpowers/plans/2026-10-13-ann-recall-optimization.md # 质量校准、配置与优化实施记录
@@ -248,7 +248,7 @@ src/vecstor/
 
 不要为满足目录树而创建空模块。新增、移动、删除目录或改变职责时，在同一次改动中更新本节；已实现目录移入“当前项目文件”，未实现内容保留为规划。
 
-index/与storage/已支持权威索引持久发布与完整重建；后续推进数据缓存、自适应策略和更广泛并发/消融实验。参考资料入口：[相关 GitHub 仓库与复用建议](docs/research/github-reference-survey.md)。该调研为技术评估，不表示已集成所有上游组件。
+index/与storage/已支持权威索引持久发布与完整重建，cache/及读取链路已支持有界向量缓存和按需传输；后续优先评估统计遍历开销，再推进自适应策略和更广泛并发/消融实验。参考资料入口：[相关 GitHub 仓库与复用建议](docs/research/github-reference-survey.md)。该调研为技术评估，不表示已集成所有上游组件。
 
 ## 7. 开发约束
 
