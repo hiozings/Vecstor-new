@@ -1,6 +1,6 @@
 # P4 有界数据缓存与传输优化实施计划
 
-> 执行时使用executing-plans，按任务推进、每任务先失败测试再实现；如用户另选代理执行方式再调整。**本文件是2026-10-19规划交付，不是业务实施记录。2026-10-19已按用户授权开始实施：T1—T6完成，T7—T8待实施。** 后续Git检查、建分支及提交须有适用于本子阶段的用户授权，不把旧索引阶段授权自动扩为合并/推送授权。
+> 执行时使用executing-plans，按任务推进、每任务先失败测试再实现；如用户另选代理执行方式再调整。**本文件是2026-10-19规划交付，不是业务实施记录。2026-10-19已按用户授权开始实施：T1—T7完成，T8待实施。** 后续Git检查、建分支及提交须有适用于本子阶段的用户授权，不把旧索引阶段授权自动扩为合并/推送授权。
 
 **Goal:** 在既有MVCC/工件身份约束下交付有界向量缓存、按需元数据与选择性fused读取，保留独立开关，用真实双节点/故障/资源及配对实验验证。
 
@@ -151,11 +151,11 @@
 
 **Interfaces:** `run_cache_acceptance(output_dir: Path, rows: int=10000, dimension: int=128, require_gpu: bool=False) -> dict`；output必须不存在，异常也写报告和清进程。报告只对实际运行项标PASS，关联pytest故障证据；不虚构覆盖矩阵。
 
-- [ ] 先写小fixture验收测试：真实PTY `.cache stats/clear`、SQL SETTINGS、source摘要、每场景判据、错误退出不残留进程、输出不覆盖；初始缺工具失败。
-- [ ] 实现存储+独立A/B进程，A暖/B冷同租约快照答案；写入后新revision/旧在途读；同revision换工件；A重启空cache但published preload不训练；存储重启epoch变化且老cache不可命中。
-- [ ] 用Event/管道固定暂停点，验证命中后取消、clear期间下载、DROP重建、受控同revision备份恢复、缓存损坏协议拒绝；存储停机不能从cache离线开始查询。
-- [ ] GPU worker及A/B对data-root/工件文件Landlock实际拒读，缓存命中不构成直接读文件；真实GPU至少一个支持负载验证，不扩大既有GPU质量范围。
-- [ ] 定向测试通过后运行新目录1万、10万、--require-gpu验收；保存C01—C14映射、PID/隔离/逐查询/计数/失败记录；提交建议`test: validate cached reads across revisions and process restarts`。
+- [x] 先写小fixture验收测试：真实PTY `.cache stats/clear`、SQL SETTINGS、source摘要、每场景判据、错误退出不残留进程、输出不覆盖；初始缺工具失败。
+- [x] 实现存储+独立A/B进程，A暖/B冷同租约快照答案；写入后新revision/旧在途读；同revision换工件；A重启空cache但published preload不训练；存储重启epoch变化且老cache不可命中。
+- [x] 用Event/管道固定暂停点，验证命中后取消、clear期间下载、DROP重建、受控同revision备份恢复、缓存损坏协议拒绝；存储停机不能从cache离线开始查询。
+- [x] GPU worker及A/B对data-root/工件文件Landlock实际拒读，缓存命中不构成直接读文件；真实GPU至少一个支持负载验证，不扩大既有GPU质量范围。
+- [x] 定向测试通过后运行新目录1万、10万、--require-gpu验收；保存C01—C14映射、PID/隔离/逐查询/计数/失败记录；提交建议`test: validate cached reads across revisions and process restarts`。
 
 ## Task 8：配对成本、消融与最终交付
 
@@ -198,3 +198,7 @@
 M1=T1—T3协议与预算基础；M2=T4—T6可使用的独立优化；M3=T7故障与双节点；M4=T8实验及最终交付。若M2收益不明显，仍完成正确性和失败记录，不扩大到自动策略“补救”。
 
 本计划建议延续由同一执行者逐任务实施、最终一次独立审查的方式，因为scope/协议/计数接口高度相互依赖；本轮只完成文档，不启动实现或审查代理。
+
+## 2026-10-19实验范围调整
+
+用户已明确选择“先跑代表性正式矩阵，保留全量复现入口”。T8保留correctness/costs/gpu完整tier，新增representative tier执行本轮代表性实验；三次重复和独立开关仍保留，样本数、数据规模/分布、负载、并发/冷热、容量/延迟及GPU覆盖逐项写入配置和报告。未执行的全量组合明确标记NOT_RUN，不能宣称原200查询全矩阵通过。

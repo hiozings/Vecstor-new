@@ -119,7 +119,7 @@ GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复
 
 P4索引子阶段T1—T9已于2026-10-18完成：[设计](docs/design/p4-index-publication.md)、[实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)、[使用说明](docs/p4-indexes.md)、[验收记录](docs/validation/p4-indexes.md)。计算侧显式构建，存储校验/落盘/目录原子发布，读租约绑定权威工件，双计算节点RPC加载；支持批量写入后完整重建、零训练重启、GPU重克隆、v3工件质量绑定及引用保护GC。最终不设置PYTHONPATH的真实GPU完整回归687通过，另补4项进程验收通过；1万/10万规模、12组生命周期成本和CPU/GPU各500条冻结留出验证通过。审查补齐目录同步重试、DROP表回收与上传清理重试。保持数据库级revision；数据缓存、自适应策略、表级版本与增量维护尚未实现，不代表全部P4完成。
 
-P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/design/p4-data-cache-and-transfer.md)及[八任务实施计划](docs/superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)，T1—T6已实现：有界内核、epoch/TTL、投影/选择性RPC、separate/fused缓存与用户开关已接入，最新68项控制/缓存回归通过；T7—T8真实规模/故障及正式成本验收仍待完成。拟采用计算侧按storage epoch/数据库/表/revision隔离的有界原始向量缓存、miss批量读取、按需元数据与选择性fused返回；默认关闭，缓存/字段投影/合并路径独立消融。保留每请求读租约与存储过滤，明确缓存逻辑容量、临时工作区和实际RSS的区别；自适应策略、增量维护与过滤结果缓存仍后置。缓存/投影命令已接入但正式交付尚未验收，不代表缓存子阶段完成。
+P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/design/p4-data-cache-and-transfer.md)及[八任务实施计划](docs/superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)，T1—T7已实现：有界内核、epoch/TTL、投影/选择性RPC、separate/fused缓存与用户开关已接入，阶段完整819项真实GPU回归通过；1万/10万/GPU隔离生命周期24/24/26项通过；T8代表性正式成本、最终回归与审查待完成。用户选择保留全量实验入口，本轮只执行代表性正式矩阵。拟采用计算侧按storage epoch/数据库/表/revision隔离的有界原始向量缓存、miss批量读取、按需元数据与选择性fused返回；默认关闭，缓存/字段投影/合并路径独立消融。保留每请求读租约与存储过滤，明确缓存逻辑容量、临时工作区和实际RSS的区别；自适应策略、增量维护与过滤结果缓存仍后置。缓存/投影命令已接入但正式交付尚未验收，不代表缓存子阶段完成。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -154,6 +154,7 @@ P4数据缓存与传输优化子阶段已于2026-10-19形成[设计提案](docs/
 │   ├── check_gpu_ann.py  # 独立子进程GPU组件能力探测
 │   ├── check_gpu.py      # 真实GPU/PTY/双进程存储隔离和生命周期验收
 │   ├── check_p3.py       # CPU ANN 双路径、真实终端与隔离验收
+│   ├── check_p4_cache.py # 缓存/投影真实终端、双节点/重启与隔离验收
 │   ├── check_p4_indexes.py # 双计算节点持久工件、重启与隔离生命周期验收
 │   └── generate_proto.py # 生成协议 Python 模块
 ├── proto/vecstor/rpc/services.proto # P2 v1 协议源文件
