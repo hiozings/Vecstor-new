@@ -38,3 +38,25 @@ verifier峰值使用exec后`/proc/self/status`的VmHWM，同时保留原始ru_ma
 整体设计与验收要求见[设计](../../docs/design/p4-index-publication.md)。
 
 2026-10-18正式结果及最终回归/故障矩阵见[P4验收记录](../../docs/validation/p4-indexes.md)。原始成本版本与后续审查修复版本分别记录，不把测量前的耗时当作最终修复后重测。
+
+## 数据缓存与字段传输（T8验收中）
+
+```bash
+python benchmarks/p4/data_reads.py --output-dir results/p4-data-smoke --tier smoke
+python benchmarks/p4/data_reads.py --output-dir results/p4-data-representative --tier representative
+# 完整tier较耗时；每场景200查询、三次重复。
+python benchmarks/p4/data_reads.py --output-dir results/p4-data-correctness --tier correctness
+python benchmarks/p4/data_reads.py --output-dir results/p4-data-costs --tier costs
+python benchmarks/p4/data_reads.py --output-dir results/p4-data-gpu --tier gpu \
+  --gpu-calibration-dir results/gpu-calibration-20261015
+```
+
+用户已选择本轮只执行representative：38个场景、630次配置运行、33,744条计时查询。主CPU读成本为1万/10万×独立/相关×并发1/4/8，每阶段20查询、3重复、8种cache/projection/separate-fused组合；另有exact/filter-first的小样本正确性探针、选择性负载、8/64MiB容量、0/1/5ms单向延迟和两个GPU冻结支持负载。exact/filter-first探针每阶段仅1查询，不能作延迟统计推论。容量组每阶段200查询；各场景精确参数记录于config.json，不声称全量覆盖。
+
+为串行运行不同后端，可使用`--case-ids`选择已输出manifest的编号；选择写入配置，部分运行不会标成full coverage。当前representative的0—35为CPU，36—37为GPU。GPU组会先按已发布工件重新执行对应500条留出验证并导出v3配置，然后带实际质量配置测试优化；缺校准目录明确失败，不用随意参数替代。
+
+每个变体新建计算进程、加载同一工件、预热各客户端一次后清缓存，再按cold/warm/independent/hotset序列测量；cold仅指应用缓存已清，索引、会话与OS页缓存已热。warm复用cold查询，independent换seed，hotset80%取前20条cold查询，状态延续前序阶段，实测命中率不预设。配置顺序固定seed随机化；答案参考进程在计时前退出，避免额外驻留索引/显存影响比较。正确性校验在吞吐计时之外；每查询保留原始计划/答案、独立NumPy真值及冻结基线签名。少于20样本不输出P95，其余分位数仍为描述性统计。
+
+延迟由测试专用loopback代理在读取RPC转发前/首响应前各加固定时延，后续stream帧不重复延迟，不模拟带宽/拥塞；同时保留0ms代理对照和BeginRead实测往返（含存储执行）。代理与实验驱动共进程，资源字段明确包含驱动开销，不冒充纯代理CPU。网络字节仍为Protobuf序列化字节。
+
+资源每5ms采样；compute为新进程，storage在同数据组中复用，storage CPU字段是累计进程生命周期值，不能直接解释为单变体CPU开销。缓存记账峰值为查询完成时采样，工作区峰值来自服务计数；不是物理RSS硬限。未执行的完整tier在报告标NOT_RUN。
