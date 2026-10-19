@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 from threading import BoundedSemaphore, Lock
 import time
+import uuid
 
 import grpc
 import numpy as np
@@ -50,6 +51,7 @@ class SQLStorageService(rpc.SQLStorageServicer):
         from vecstor.storage.index_artifacts import ArtifactStore
         from vecstor.storage.index_service import IndexPublicationService
         store = ArtifactStore(Path(root)/'indexes',**(artifact_options or {}))
+        self.storage_epoch = uuid.uuid4().hex
         self.catalog = DatabaseCatalog(root,candidate_binding,candidate_plan_cache,artifact_store=store)
         # Shared occupancy cap prevents either stream type from starving the
         # FetchVectors, BeginRead and EndRead unary handlers.
@@ -71,7 +73,7 @@ class SQLStorageService(rpc.SQLStorageServicer):
         timeout = _remaining(context)
         try:
             if request.action == 'capabilities':
-                result={'fused_candidate_vectors':True, 'index_publication_version':1}
+                result={'fused_candidate_vectors':True, 'index_publication_version':1, 'data_cache_epoch_version':1}
             elif request.action == 'list_databases':
                 result = self.catalog.list_databases()
             elif request.action == 'open_database':
@@ -116,6 +118,7 @@ class SQLStorageService(rpc.SQLStorageServicer):
                 raise ValueError('Read TTL must be finite and positive')
             ttl = min(ttl, timeout, 60.0)
             lease = self.catalog.begin_read(request.database_id, request.table, ttl=ttl,timeout=timeout)
+            lease = dict(lease, storage_epoch=self.storage_epoch, effective_ttl_seconds=ttl)
             with self._lease_lock:
                 now = time.monotonic()
                 self._leases = {key:value for key,value in self._leases.items() if value[1] > now}

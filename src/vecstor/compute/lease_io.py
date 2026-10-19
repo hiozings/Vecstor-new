@@ -60,8 +60,10 @@ class LeaseIO:
         finally: call.cancel()
 
     def open(self):
+        self._lease_sent_at=time.monotonic()
+        self._requested_ttl=min(60,self.remaining())
         self.lease=self.call(self.stub.BeginRead,pb.BeginReadRequest(database_id=self.database_id,table=self.table,
-                                                ttl_seconds=min(60,self.remaining())))
+                                                ttl_seconds=self._requested_ttl))
         lease=self.lease
         consistent(bool(lease.token) and lease.database_id==self.database_id and lease.table==self.table
                    and bool(lease.table_id) and bool(lease.schema_version) and 0<lease.dimension*4<=VECTOR_PAYLOAD_BYTES,
@@ -71,6 +73,22 @@ class LeaseIO:
                           revision=lease.revision,schema_version=lease.schema_version,dimension=lease.dimension,
                           table_rows=lease.row_count if lease.HasField('row_count') else None)
         return lease
+
+    def configure_cache_lease(self):
+        from vecstor.cache.types import DataScope
+        lease=self.lease
+        if lease is None or not lease.storage_epoch:
+            raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'Storage lacks data cache epoch capability')
+        ttl=lease.effective_ttl_seconds
+        consistent(math.isfinite(ttl) and 0<ttl<=self._requested_ttl<=60,'Invalid effective cache lease TTL')
+        try:
+            scope=DataScope(lease.storage_epoch,lease.database_id,lease.table_id,lease.revision,
+                            lease.schema_version,lease.dimension)
+        except ValueError as error:
+            raise RemoteError(grpc.StatusCode.DATA_LOSS,str(error)) from error
+        self.deadline=min(self.deadline,self._lease_sent_at+ttl)
+        self.remaining()
+        return scope
 
     def close(self):
         if self.lease is not None:

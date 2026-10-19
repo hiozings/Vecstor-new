@@ -69,6 +69,8 @@ message ReadLease {
   uint64 publication_generation = 10;
   IndexArtifactDescriptor published_index = 11;
   string published_index_state = 12;
+  string storage_epoch = 13;
+  double effective_ttl_seconds = 14;
 }
 message LeaseRequest { string database_id = 1; string token = 2; }
 message ScanRequest { string database_id = 1; string token = 2; string sql = 3; uint32 batch_rows = 4; }
@@ -117,6 +119,46 @@ message FilteredVectorResult {
   repeated vecstor.v1.Row rows = 5;
   uint32 dimension = 6;
   bytes vectors_f32_le = 7;
+}
+message ProjectedRow {
+  optional int64 id = 1;
+  optional string category = 2;
+  optional int64 timestamp = 3;
+  optional double value = 4;
+}
+message ProjectedScanRequest {
+  string database_id = 1;
+  string token = 2;
+  string sql = 3;
+  uint32 batch_rows = 4;
+  repeated string fields = 5;
+}
+message ProjectedMetadataBatch {
+  string token = 1;
+  uint64 revision = 2;
+  uint64 total_rows = 3;
+  uint64 offset = 4;
+  repeated string fields = 5;
+  repeated ProjectedRow rows = 6;
+  bool complete = 7;
+}
+message ProjectedCandidateRequest {
+  string database_id = 1;
+  string token = 2;
+  string sql = 3;
+  repeated int64 checked_ids = 4;
+  repeated string fields = 5;
+  repeated int64 vector_ids = 6;
+}
+message ProjectedCandidateResult {
+  string token = 1;
+  uint64 revision = 2;
+  repeated int64 checked_ids = 3;
+  repeated string fields = 4;
+  repeated ProjectedRow rows = 5;
+  uint32 dimension = 6;
+  repeated int64 vector_ids = 7;
+  bytes vectors_f32_le = 8;
 }
 message BuildIndexRequest {
   string database_id = 1;
@@ -254,6 +296,8 @@ service SQLStorage {
   rpc BeginRead(BeginReadRequest) returns (ReadLease);
   rpc EndRead(LeaseRequest) returns (vecstor.v1.Empty);
   rpc ScanMetadata(ScanRequest) returns (stream MetadataBatch);
+  rpc ScanProjectedMetadata(ProjectedScanRequest) returns (stream ProjectedMetadataBatch);
+  rpc ReadProjectedCandidates(ProjectedCandidateRequest) returns (ProjectedCandidateResult);
   rpc FetchVectors(FetchRequest) returns (VectorBatch);
   rpc StreamVectorSnapshot(SnapshotRequest) returns (stream SnapshotBatch);
   rpc FilterCandidates(CandidateRequest) returns (CandidateResult);

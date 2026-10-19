@@ -60,6 +60,16 @@ class SQLStorageStub:
                 request_serializer=vecstor_dot_rpc_dot_sql__pb2.ScanRequest.SerializeToString,
                 response_deserializer=vecstor_dot_rpc_dot_sql__pb2.MetadataBatch.FromString,
                 _registered_method=True)
+        self.ScanProjectedMetadata = channel.unary_stream(
+                '/vecstor.v2.SQLStorage/ScanProjectedMetadata',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.ProjectedScanRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.ProjectedMetadataBatch.FromString,
+                _registered_method=True)
+        self.ReadProjectedCandidates = channel.unary_unary(
+                '/vecstor.v2.SQLStorage/ReadProjectedCandidates',
+                request_serializer=vecstor_dot_rpc_dot_sql__pb2.ProjectedCandidateRequest.SerializeToString,
+                response_deserializer=vecstor_dot_rpc_dot_sql__pb2.ProjectedCandidateResult.FromString,
+                _registered_method=True)
         self.FetchVectors = channel.unary_unary(
                 '/vecstor.v2.SQLStorage/FetchVectors',
                 request_serializer=vecstor_dot_rpc_dot_sql__pb2.FetchRequest.SerializeToString,
@@ -145,6 +155,18 @@ class SQLStorageServicer:
         raise NotImplementedError('Method not implemented!')
 
     def ScanMetadata(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ScanProjectedMetadata(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReadProjectedCandidates(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -243,6 +265,16 @@ def add_SQLStorageServicer_to_server(servicer, server):
                     servicer.ScanMetadata,
                     request_deserializer=vecstor_dot_rpc_dot_sql__pb2.ScanRequest.FromString,
                     response_serializer=vecstor_dot_rpc_dot_sql__pb2.MetadataBatch.SerializeToString,
+            ),
+            'ScanProjectedMetadata': grpc.unary_stream_rpc_method_handler(
+                    servicer.ScanProjectedMetadata,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.ProjectedScanRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.ProjectedMetadataBatch.SerializeToString,
+            ),
+            'ReadProjectedCandidates': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReadProjectedCandidates,
+                    request_deserializer=vecstor_dot_rpc_dot_sql__pb2.ProjectedCandidateRequest.FromString,
+                    response_serializer=vecstor_dot_rpc_dot_sql__pb2.ProjectedCandidateResult.SerializeToString,
             ),
             'FetchVectors': grpc.unary_unary_rpc_method_handler(
                     servicer.FetchVectors,
@@ -435,6 +467,60 @@ class SQLStorage:
             '/vecstor.v2.SQLStorage/ScanMetadata',
             vecstor_dot_rpc_dot_sql__pb2.ScanRequest.SerializeToString,
             vecstor_dot_rpc_dot_sql__pb2.MetadataBatch.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ScanProjectedMetadata(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/vecstor.v2.SQLStorage/ScanProjectedMetadata',
+            vecstor_dot_rpc_dot_sql__pb2.ProjectedScanRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.ProjectedMetadataBatch.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReadProjectedCandidates(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vecstor.v2.SQLStorage/ReadProjectedCandidates',
+            vecstor_dot_rpc_dot_sql__pb2.ProjectedCandidateRequest.SerializeToString,
+            vecstor_dot_rpc_dot_sql__pb2.ProjectedCandidateResult.FromString,
             options,
             channel_credentials,
             insecure,

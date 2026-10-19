@@ -1,6 +1,6 @@
 # P4 有界数据缓存与传输优化实施计划
 
-> 执行时使用executing-plans，按任务推进、每任务先失败测试再实现；如用户另选代理执行方式再调整。**本文件是2026-10-19规划交付，不是业务实施记录。所有任务尚未执行。** 后续Git检查、建分支及提交须有适用于本子阶段的用户授权，不把旧索引阶段授权自动扩为合并/推送授权。
+> 执行时使用executing-plans，按任务推进、每任务先失败测试再实现；如用户另选代理执行方式再调整。**本文件是2026-10-19规划交付，不是业务实施记录。2026-10-19已按用户授权开始实施：T1—T2完成，T3—T8待实施。** 后续Git检查、建分支及提交须有适用于本子阶段的用户授权，不把旧索引阶段授权自动扩为合并/推送授权。
 
 **Goal:** 在既有MVCC/工件身份约束下交付有界向量缓存、按需元数据与选择性fused读取，保留独立开关，用真实双节点/故障/资源及配对实验验证。
 
@@ -55,12 +55,12 @@
 - `LookupBatch`公开readonly ids、missing_ids、generation和请求局部计数；`finish(matched_ids: tuple[int,...], remote_ids: tuple[int,...], remote_vectors: np.ndarray, *, admit: bool, check: Callable[[],None]) -> np.ndarray`。remote_ids必须精确等于matched_ids中的miss，按matched顺序；输出匹配顺序float32数组。separate的matched_ids就是输入ids。进入finish前远端协议已校验，finish仍检查集合/形状/有限值。返回数组由查询拥有，不引用缓存；退出context归还4MiB工作区名额。
 - `stats(database_id: str) -> dict`只读总容量和所选库占用；`clear(database_id: str) -> dict`回收选库所有scope并推进全局admission_generation；无跨请求计数差。
 
-- [ ] 写`test_budget_and_lru`：dimension=4、max_bytes=2080恰容纳1个scope+2条(512+16)；第三条淘汰最久未用、touch改变次序；条目上限独立约束。`test_large_entry_bypasses`验证max_bytes=1024不能容纳记录，结果仍可返回。
-- [ ] 写`test_copy_owns_only_one_vector`：从1MiB响应插入一行，删除响应后缓存只保留16字节payload；改变输出不影响下一次读取；负零字节及id=2**53+1保持。`test_conflicting_same_key_is_data_loss`不得覆盖。
-- [ ] 写同步Event测试`test_clear_during_download_cannot_refill`、`test_parallel_miss_is_not_single_flight`、`test_workspace_exhaustion_bypasses`：4个上下文占满，第5个立即None；结束/异常后容量复原；进程记账不越限。
-- [ ] 运行失败测试：`conda run -n vecstor python -m pytest -q tests/unit/test_vector_data_cache.py tests/unit/test_data_cache_concurrency.py`；初始应因缺模块/接口失败，记录原因。
-- [ ] 实现上述接口及LRU，scope空后释放1024额度，不把RPC放入锁内；finish只缓存匹配且校验成功的remote行，已缓存未匹配行不进入结果。
-- [ ] 同命令通过后检查C02/C07、维护AGENTS新cache目录和CHANGELOG；提交建议`feat: add bounded revision scoped vector data cache`。
+- [x] 写`test_budget_and_lru`：dimension=4、max_bytes=2080恰容纳1个scope+2条(512+16)；第三条淘汰最久未用、touch改变次序；条目上限独立约束。`test_large_entry_bypasses`验证max_bytes=1024不能容纳记录，结果仍可返回。
+- [x] 写`test_copy_owns_only_one_vector`：从1MiB响应插入一行，删除响应后缓存只保留16字节payload；改变输出不影响下一次读取；负零字节及id=2**53+1保持。`test_conflicting_same_key_is_data_loss`不得覆盖。
+- [x] 写同步Event测试`test_clear_during_download_cannot_refill`、`test_parallel_miss_is_not_single_flight`、`test_workspace_exhaustion_bypasses`：4个上下文占满，第5个立即None；结束/异常后容量复原；进程记账不越限。
+- [x] 运行失败测试：`conda run -n vecstor python -m pytest -q tests/unit/test_vector_data_cache.py tests/unit/test_data_cache_concurrency.py`；初始应因缺模块/接口失败，记录原因。
+- [x] 实现上述接口及LRU，scope空后释放1024额度，不把RPC放入锁内；finish只缓存匹配且校验成功的remote行，已缓存未匹配行不进入结果。
+- [x] 同命令通过后检查C02/C07、维护AGENTS新cache目录和CHANGELOG；提交建议`feat: add bounded revision scoped vector data cache`。
 
 ## Task 2：存储epoch、保守租约期限和协议契约
 
@@ -72,11 +72,11 @@
 - 声明设计§7两个新Projected RPC及消息；明确字段号1—8/optional存在性、最后帧complete。实现前新RPC返回UNIMPLEMENTED；`data_read_version=1`只在T3真正实现后公布；epoch能力T2可独立公布。
 - `LeaseIO.open()`继续返回ReadLease；新增`configure_cache_lease() -> DataScope`校验epoch/实际TTL，使用open已记录的t0收紧deadline。关闭缓存的旧服务不要求新字段。每请求不能再次BeginRead替换过期租约。
 
-- [ ] 写`test_storage_restart_changes_epoch_even_same_revision`：同数据库重启后revision不变、epoch不同；备份恢复相同database/table/revision但向量内容不同的受控fixture也不得命中旧scope。
-- [ ] 写`test_cache_deadline_uses_send_time_and_granted_ttl`，受控单调时钟t0=100、返回时101、TTL=2，本地截止102，不能变成103；0/NaN/超过请求TTL拒绝。全部hit也检查取消/到期。
-- [ ] 写optional字段roundtrip测试：id=0/value=0能区分缺失；旧ReadLease字段序列化语义不变，新proto未实现接口明确拒绝。
-- [ ] 定向测试先失败；修改proto并运行`conda run -n vecstor python scripts/generate_proto.py`，不手改生成文件。实现epoch/TTL，再运行上述单元/集成测试及原test_p3_lease_io.py、test_p4_index_recovery.py。
-- [ ] 通过后提交建议`feat: bind data cache reads to storage epochs and lease deadlines`；此时新投影能力仍未开放。
+- [x] 写`test_storage_restart_changes_epoch_even_same_revision`：同数据库重启后revision不变、epoch不同；备份恢复相同database/table/revision但向量内容不同的受控fixture也不得命中旧scope。
+- [x] 写`test_cache_deadline_uses_send_time_and_granted_ttl`，受控单调时钟t0=100、返回时101、TTL=2，本地截止102，不能变成103；0/NaN/超过请求TTL拒绝。全部hit也检查取消/到期。
+- [x] 写optional字段roundtrip测试：id=0/value=0能区分缺失；旧ReadLease字段序列化语义不变，新proto未实现接口明确拒绝。
+- [x] 定向测试先失败；修改proto并运行`conda run -n vecstor python scripts/generate_proto.py`，不手改生成文件。实现epoch/TTL，再运行上述单元/集成测试及原test_p3_lease_io.py、test_p4_index_recovery.py。
+- [x] 通过后提交建议`feat: bind data cache reads to storage epochs and lease deadlines`；此时新投影能力仍未开放。
 
 ## Task 3：投影元数据与选择性候选RPC
 
