@@ -156,14 +156,26 @@ class VersionedVectorCache:
                 self._entries[key]=raw
                 statistics['admitted_rows']+=1;statistics['admitted_payload_bytes']+=len(raw)
 
+    def _process_snapshot_locked(self):
+        return dict(max_bytes=self.config.max_bytes,max_entries=self.config.max_entries,
+            accounted_bytes=self._bytes,payload_bytes=self._payload_bytes,
+            entry_count=len(self._entries),scope_count=len(self._scopes),
+            workspace_bytes=self._active*WORKSPACE_CHARGE,
+            workspace_peak_bytes=self._workspace_peak,admission_generation=self._generation)
+
+    def process_snapshot(self):
+        """Return detached, coherent process counters in O(1) work under the lock.
+
+        Lock acquisition can still wait for concurrent cache operations.
+        """
+        with self._lock:
+            return self._process_snapshot_locked()
+
     def stats(self, database_id):
         with self._lock:
             rows=[(scope,len(raw)) for (scope,_),raw in self._entries.items() if scope.database_id==database_id]
             scopes={s for s,_ in rows};payload=sum(size for _,size in rows)
-            return dict(data_cache_version=1,process=dict(max_bytes=self.config.max_bytes,
-                max_entries=self.config.max_entries,accounted_bytes=self._bytes,payload_bytes=self._payload_bytes,
-                entry_count=len(self._entries),scope_count=len(self._scopes),workspace_bytes=self._active*WORKSPACE_CHARGE,
-                workspace_peak_bytes=self._workspace_peak,admission_generation=self._generation),
+            return dict(data_cache_version=1,process=self._process_snapshot_locked(),
                 database=dict(database_id=database_id,entry_count=len(rows),scope_count=len(scopes),payload_bytes=payload,
                               accounted_bytes=len(scopes)*SCOPE_CHARGE+len(rows)*ENTRY_CHARGE+payload))
 

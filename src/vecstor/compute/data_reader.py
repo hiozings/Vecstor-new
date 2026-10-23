@@ -99,7 +99,7 @@ class CachedLeaseReader:
         stats['hit_rate']=stats['hit_rows']/stats['lookup_rows'] if stats['lookup_rows'] else None
         stats['cache_payload_bytes_avoided']=stats['vectors_served_from_cache']*self.io.lease.dimension*4
         if self.cache is not None:
-            snapshot=self.cache.stats(self.io.database_id)
-            stats.update(accounted_bytes=snapshot['process']['accounted_bytes'],entry_count=snapshot['process']['entry_count'])
+            snapshot=self.cache.process_snapshot()
+            stats.update(accounted_bytes=snapshot['accounted_bytes'],entry_count=snapshot['entry_count'])
         else:stats.update(accounted_bytes=0,entry_count=0)
         return stats
