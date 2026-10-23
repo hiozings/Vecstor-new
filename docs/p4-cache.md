@@ -2,6 +2,8 @@
 
 状态：T1—T8已按用户选择的代表性实验范围完成。审查修复后838项完整真实GPU回归、630次配置/33744条计时查询通过；性能收益和退化见[验收记录](validation/p4-cache.md)。设计见[缓存与传输设计](design/p4-data-cache-and-transfer.md)，实施记录见[八任务计划](superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)。
 
+2026-10-23追加优化：查询统计改为O(1)快照，完整真实GPU回归841项通过；CPU串行/容量前后对照见[快照验收](validation/cache-stats-snapshot.md)。
+
 ## 启动与请求控制
 
 默认不启用缓存，元数据仍走full路径。已按[持久索引说明](p4-indexes.md)准备存储和发布工件后，可启动：
@@ -73,4 +75,4 @@ python benchmarks/p4/data_reads.py --output-dir results/p4-data-reads-new --tier
 
 目录必须不存在，失败保留report及已执行证据，finally回收进程。完整实验入口为correctness/costs/gpu；代表性矩阵不等同于完整200查询矩阵。实验流程、样本及局限见[实验说明](../benchmarks/p4/README.md)。
 
-已知非阻断成本：每请求describe的用量统计目前会在锁内遍历缓存条目；部分CPU暖态即使省去向量RPC仍出现延迟退化。默认不自动开启优化，后续优先评估常数时间统计快照，不能把传输减少等同于普遍提速。
+2026-10-23已将每请求describe改为常数时间进程统计快照，复用既有标量，避免遍历缓存。显式`.cache stats`的分库统计仍按需遍历；并发锁等待、逐行复制和LRU成本仍存在。针对既有CPU退化场景的前后对照见[快照验收](validation/cache-stats-snapshot.md)，默认不自动开启优化，不能把传输减少等同于普遍提速。

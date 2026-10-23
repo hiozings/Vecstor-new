@@ -2,7 +2,7 @@
 
 本文件适用于整个项目，供团队成员与开发代理共同遵循。记录项目实施计划、目录结构、技术栈和开发约束；后续开发应同步维护，避免文档与实际实现脱节。
 
-最后更新：2026-10-19。
+最后更新：2026-10-23。
 
 ## 1. 项目背景与当前状态
 
@@ -62,7 +62,7 @@
 | gRPC / Protobuf | 查询、目录、类型化 SQL 结果与读租约 | grpcio/grpcio-tools 1.83.1、protobuf 7.35.1；兼容 P2 v1 并新增 P2.5 v2；P4已接入类型化工件发布/分发与能力确认 |
 | prompt_toolkit / Rich | 多行终端、历史/补全与表格 | 3.0.53 / 15.0.0，已通过 Conda 安装并锁定 |
 | Arrow Flight | 批量列式数据传输 | 可选，只有测出传输瓶颈后再评估 |
-| pytest | 正确性、接口与集成测试 | 9.1.1；缓存审查修复后838项完整真实GPU回归通过（零跳过），覆盖P1/P2/P2.5/P3/质量/GPU/P4索引与缓存，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
+| pytest | 正确性、接口与集成测试 | 9.1.1；查询统计快照优化后841项完整真实GPU回归通过（零跳过），覆盖P1/P2/P2.5/P3/质量/GPU/P4索引与缓存，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
 | 容器与部署脚本 | 隔离部署、复现实验 | 随原型补充，不先引入复杂集群平台 |
 
 安装状态与业务集成状态必须分开记录。通过 Conda 管理依赖，不混用 uv/pip 覆盖 Conda 管理的 Faiss、NumPy 和 CUDA 库。`environment.yml` 固定直接依赖，`environments/vecstor-linux-64.explicit.txt` 固定全部 Conda 包的构建和 MD5。保留 CPU 后端，GPU 计算使用本机已有设备。
@@ -119,7 +119,9 @@ GPU G0—G2已实施：修复候选完整覆盖与GPU响应校验，热会话复
 
 P4索引子阶段T1—T9已于2026-10-18完成：[设计](docs/design/p4-index-publication.md)、[实施计划](docs/superpowers/plans/2026-10-16-p4-index-publication.md)、[使用说明](docs/p4-indexes.md)、[验收记录](docs/validation/p4-indexes.md)。计算侧显式构建，存储校验/落盘/目录原子发布，读租约绑定权威工件，双计算节点RPC加载；支持批量写入后完整重建、零训练重启、GPU重克隆、v3工件质量绑定及引用保护GC。最终不设置PYTHONPATH的真实GPU完整回归687通过，另补4项进程验收通过；1万/10万规模、12组生命周期成本和CPU/GPU各500条冻结留出验证通过。审查补齐目录同步重试、DROP表回收与上传清理重试。该索引子阶段保留数据库级revision；数据缓存进度见下文，自适应策略、表级版本与增量维护仍待推进，不代表全部P4完成。
 
-P4数据缓存与传输优化子阶段T1—T8已于2026-10-19按代表性实验范围完成：[设计](docs/design/p4-data-cache-and-transfer.md)、[计划](docs/superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)、[使用说明](docs/p4-cache.md)、[验收](docs/validation/p4-cache.md)。实现epoch/revision隔离的有界原始向量LRU、miss批读、按需元数据及选择性fused、独立启动/会话/SQL开关和用量/清理接口；默认关闭，保留每请求租约与存储过滤。审查修复后完整真实GPU且无PYTHONPATH回归838通过；代表性38场景/630次配置/33744计时查询通过，CPU/GPU源码SHA与回归一致。传输减少不保证延迟下降，CPU部分串行/容量组有退化；每查询统计遍历为非阻断待优化项。完整200查询矩阵未运行，全部复现入口保留；自适应策略、表级版本、增量维护及过滤结果缓存仍后置，不代表全部P4完成。
+P4数据缓存与传输优化子阶段T1—T8已于2026-10-19按代表性实验范围完成：[设计](docs/design/p4-data-cache-and-transfer.md)、[计划](docs/superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md)、[使用说明](docs/p4-cache.md)、[验收](docs/validation/p4-cache.md)。实现epoch/revision隔离的有界原始向量LRU、miss批读、按需元数据及选择性fused、独立启动/会话/SQL开关和用量/清理接口；默认关闭，保留每请求租约与存储过滤。审查修复后完整真实GPU且无PYTHONPATH回归838通过；代表性38场景/630次配置/33744计时查询通过，CPU/GPU源码SHA与回归一致。传输减少不保证延迟下降，CPU部分串行/容量组有退化；原验收保留的每查询统计遍历已于2026-10-23改为常数时间快照，见后续记录。完整200查询矩阵未运行，全部复现入口保留；自适应策略、表级版本、增量维护及过滤结果缓存仍后置，不代表全部P4完成。
+
+2026-10-23查询统计优化完成：[计划](docs/superpowers/plans/2026-10-23-cache-stats-snapshot.md)、[验收](docs/validation/cache-stats-snapshot.md)。新增锁内常数时间process快照，查询不再扫描缓存，显式分库管理统计仍按需遍历；无PYTHONPATH真实GPU全套841通过。针对既有CPU串行/8及64MiB容量退化完成前后72配置/13440查询、6720对结果与计数一致；64MiB暖态开启缓存P50由63.79降至41.31ms，仍保留关闭缓存控制与波动/退化。新增benchmarks/p4/cache_stats.py独立微基准，不将微基准收益外推全部负载。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -187,7 +189,7 @@ P4数据缓存与传输优化子阶段T1—T8已于2026-10-19按代表性实验�
 │   ├── calibrate.py      # 独立校准/留出、带簇负载、冻结配置与恢复运行
 │   └── validate_quality.py # 冻结参数 RPC 对照及实际快照绑定
 ├── benchmarks/gpu/       # calibrate/run质量校准与RPC；sessions热会话/合并RPC对照；batch_probe原生批探测
-├── benchmarks/p4/        # 工件v3质量、索引生命周期及缓存传输配对/资源消融
+├── benchmarks/p4/        # 工件v3质量、索引生命周期、缓存传输配对/资源消融及统计快照微基准
 ├── configs/quality/       # 质量配置示例，绑定实际快照而非通用默认参数
 ├── tests/
 │   ├── support/          # 测试专用透明延迟代理，不进入生产服务
@@ -248,7 +250,7 @@ src/vecstor/
 
 不要为满足目录树而创建空模块。新增、移动、删除目录或改变职责时，在同一次改动中更新本节；已实现目录移入“当前项目文件”，未实现内容保留为规划。
 
-index/与storage/已支持权威索引持久发布与完整重建，cache/及读取链路已支持有界向量缓存和按需传输；后续优先评估统计遍历开销，再推进自适应策略和更广泛并发/消融实验。参考资料入口：[相关 GitHub 仓库与复用建议](docs/research/github-reference-survey.md)。该调研为技术评估，不表示已集成所有上游组件。
+index/与storage/已支持权威索引持久发布与完整重建，cache/及读取链路已支持有界向量缓存和按需传输；每查询统计已改为常数时间快照，后续推进自适应策略和更广泛并发/消融实验。参考资料入口：[相关 GitHub 仓库与复用建议](docs/research/github-reference-survey.md)。该调研为技术评估，不表示已集成所有上游组件。
 
 ## 7. 开发约束
 
