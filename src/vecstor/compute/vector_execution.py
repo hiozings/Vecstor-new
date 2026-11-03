@@ -42,7 +42,7 @@ class TopK:
         self.trace['rerank_ms']+=(time.monotonic()-started)*1000
 
 
-def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None,fused_candidates=False,index_source='local',data_cache=None,metadata_projection='full',cache_enabled=None):
+def execute_vector(stub,registry,request,plan,options,context,deadline,explain=None,quality_catalog=None,gpu_registry=None,fused_candidates=False,index_source='local',data_cache=None,metadata_projection='full',cache_enabled=None,adaptive_policy=None,observations=None,deployment_context=None,adaptive_mode='apply'):
     started=time.monotonic()
     trace={'plan_version':1,'requested_mode':options.mode,'requested_path':options.path,
            'requested_device':options.device,'actual_device':'cpu','device_fallback_reason':None,'device_attempts':[],
@@ -60,6 +60,12 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                  published_artifact_id=None,artifact_id=None,payload_sha256=None,publication_generation=0,
                  published_index_state=None,index_load_state=None)
     reader=None
+    was_auto=options.path=='auto'
+    adaptive_inputs=adaptive_resolved=None
+    adaptive_fallback=adaptive_error=None
+    if was_auto and options.mode=='approx':
+        if index_source!='published':raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'adaptive_requires_published_indexes')
+        if adaptive_policy is None:raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'adaptive_policy_missing')
     try:
         lease=io.open();query=query_vector(plan.query_vector,lease.dimension).astype(np.float64)
         from vecstor.compute.data_reader import CachedLeaseReader
@@ -106,7 +112,39 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
             trace['index_state']='ready' if entry else reason
             trace['index_load_state']='ready' if entry else reason
             quality_problem=None
-            if options.quality_profile_id is not None:
+            if was_auto:
+                from vecstor.compute.adaptive_execution import prepare_adaptive, effective_read_settings
+                from vecstor.compute.planner_types import DeploymentContext, plain
+                planner_started=time.monotonic()
+                io.configure_cache_lease();deadline=io.deadline
+                read_settings=effective_read_settings(plan,data_cache,reader.enabled,metadata_projection,fused_candidates)
+                try:
+                    adaptive_inputs,adaptive_resolved,description=prepare_adaptive(plan,options,lease,entry,
+                        quality_catalog,adaptive_policy,observations,data_cache,read_settings,
+                        deployment_context or DeploymentContext(None,None,1),io.remaining()*1000,
+                        explain=explain=='plan',mode=adaptive_mode)
+                except (RemoteError,ArtifactError) as error:
+                    if explain!='plan':raise
+                    adaptive_error=getattr(error,'reason',getattr(error,'details',str(error)))
+                    quality_problem=adaptive_error
+                    description=dict(version=1,requested_path='auto',mode=adaptive_mode,
+                        policy_id=adaptive_policy.policy_id if adaptive_policy else None,
+                        policy_hash=adaptive_policy.policy_hash if adaptive_policy else None,
+                        decision_reason='no_eligible_plan',error=adaptive_error,
+                        reference_plan=None,proposed_plan=None,executed_plan=None,
+                        planning_extra_storage_rpc_calls=0,feedback_ms=0.)
+                    trace['quality_profile']=dict(requested_id=options.quality_profile_id,state='unavailable',reason=adaptive_error)
+                    options=replace(options,path='search-first' if options.candidate_data_path=='fused' else 'filter-first')
+                else:
+                    options=adaptive_resolved.candidate.options
+                    if adaptive_resolved.candidate.quality_description is not None:
+                        trace['quality_profile']=plain(adaptive_resolved.candidate.quality_description)
+                    if entry is None and trace['requested_mode']=='approx':adaptive_fallback=reason
+                trace['adaptive']=description
+                trace['adaptive']['planner_ms']=(time.monotonic()-planner_started)*1000
+                trace['effective_options']=options.to_dict()
+                trace['candidate_data_path']='fused' if fused_candidates and options.path=='search-first' else 'separate'
+            if options.quality_profile_id is not None and not was_auto:
                 trace['quality_profile']={'requested_id':options.quality_profile_id,'state':'index_unavailable'}
                 if entry:
                     try:
@@ -133,6 +171,8 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                 if options.mode=='approx' and (not entry or quality_problem):
                     forbidden=options.device=='gpu' and options.device_fallback!='cpu'
                     trace['planned_fallback']=(quality_problem or reason) if options.fallback=='exact' and not forbidden else 'error'
+                if adaptive_error:trace['planned_fallback']='error'
+                elif adaptive_fallback:trace['planned_fallback']=adaptive_fallback
                 output=None
             else:
                 top=TopK(plan.limit,query,trace,materialize_vector=any(source=='vector' for _,source in plan.projection) if projected else None)
@@ -159,7 +199,7 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                     allowed_rows=[row for batch in reader.scan(request.sql) for row in batch]
                     allowed_map={row['id']:row for row in allowed_rows}
                     trace['matched_rows']=len(allowed_rows)
-                if options.mode=='exact':exact()
+                if options.mode=='exact':exact(adaptive_fallback)
                 elif allowed_rows is not None and not allowed_rows:exact('exact_empty',allowed_rows)
                 elif not entry:fallback(reason,allowed_rows)
                 elif quality_problem:fallback(quality_problem,allowed_rows)
@@ -240,8 +280,17 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                             for row,distance in zip(top.rows,top.distances)],'revision':lease.revision,'affected_rows':None,
                     'execution_path':f"grpc_{trace['actual_mode']}_{trace['actual_path'].replace('-','_')}"}
         io.remaining()
+    except RemoteError as error:
+        if was_auto:
+            from vecstor.compute.adaptive_execution import record_budget_failure
+            record_budget_failure(adaptive_inputs,adaptive_resolved,observations,error.details)
+        raise
     finally:io.close()
     if reader is not None:trace['data_cache']=reader.describe()
+    if adaptive_inputs is not None and explain!='plan':
+        from vecstor.compute.adaptive_execution import finish_adaptive
+        finish_adaptive(adaptive_inputs,adaptive_resolved,trace,data_cache,observations,
+                        (time.monotonic()-started)*1000,io.remaining)
     if index_source=='published' and trace['actual_mode']=='approx':
         trace.update(artifact_id=descriptor.artifact_id,payload_sha256=descriptor.payload_sha256)
     trace['compute_elapsed_ms']=(time.monotonic()-started)*1000

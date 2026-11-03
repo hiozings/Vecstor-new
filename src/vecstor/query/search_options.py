@@ -30,7 +30,7 @@ class SearchOptions:
         if self.data_cache not in ('default','off','on'):raise ValueError('Invalid data_cache option')
         if self.metadata_projection not in ('default','full','projected'):raise ValueError('Invalid metadata_projection option')
         if self.candidate_data_path not in ('default','separate','fused'):raise ValueError('Invalid candidate_data_path')
-        if self.candidate_data_path=='fused' and (self.mode!='approx' or self.path!='search-first'):
+        if self.candidate_data_path=='fused' and (self.mode!='approx' or self.path not in ('search-first','auto')):
             raise ValueError('Fused candidate reads require approx/search-first')
         if self.device not in ('cpu','gpu'):raise ValueError('device must be cpu or gpu')
         if type(self.gpu_id) is not int or self.gpu_id!=0:raise ValueError('Only gpu_id=0 is supported')
@@ -38,9 +38,10 @@ class SearchOptions:
         if self.device=='gpu' and self.mode!='approx':raise ValueError('GPU requires mode=approx')
         if self.mode not in ('exact', 'approx'):
             raise ValueError('mode must be exact or approx')
-        if self.path not in ('filter-first', 'search-first'):
-            raise ValueError('path must be filter-first or search-first')
-        if self.mode == 'exact' and self.path != 'filter-first':
+        if self.path not in ('filter-first', 'search-first', 'auto'):
+            raise ValueError('path must be filter-first, search-first or auto')
+        if self.device=='gpu' and self.path=='auto':raise ValueError('Adaptive planning supports CPU only')
+        if self.mode == 'exact' and self.path not in ('filter-first','auto'):
             raise ValueError('exact mode requires filter-first')
         if self.quality_profile_id is not None:
             validate_profile_id(self.quality_profile_id)

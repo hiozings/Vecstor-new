@@ -40,7 +40,7 @@
 | `cache/vector_cache.py`；新`compute/planner_observations.py` | O(1)scope快照/loss序号、固定schema有界历史；T2 |
 | 新`compute/planning_inputs.py`；`query/quality_policy.py` | 同租约候选资格、公开profile单项查询、统计来源/预算解析；T3 |
 | 新`compute/adaptive_planner.py` | 候选轮次/传输/缓存成本、风险分层、确定性选择；T4 |
-| `compute/vector_execution.py`、`compute/data_reader.py`、`query/search_options.py` | 执行接入、内部auto契约、实际计划/有界反馈；T5 |
+| `compute/vector_execution.py`、`compute/data_reader.py`、`query/search_options.py` | 执行接入、内部auto契约、实际计划/有界反馈；新增adaptive_execution.py封装适配逻辑；T5 |
 | `query/search_options.py/execution_settings.py`、`compute/sql_service.py/service.py`、`rpc/server.py/sql_client.py`、`shell/app.py/commands.py/completion.py` | 启动/请求/会话/能力/完成帧和活跃计数；T6 |
 | 新`benchmarks/p4/adaptive.py/adaptive_cases.py/adaptive_costs.py` | 校准、冻结策略、配对成本/质量/消融、恢复运行；T7 |
 | 新`scripts/check_p4_adaptive.py`、`rpc/p4_adaptive_acceptance.py` | PTY、双节点、重启/故障/Landlock验收；T8 |
@@ -116,12 +116,12 @@ T1定义以下冻结对象（tuple/不可变映射；无存储文件句柄/可�
 
 **Interfaces:** `execute_vector`新增可选`adaptive_policy=None, observations=None, deployment_context=None, adaptive_mode='apply'`注入，固定path不读取它们；lease/CPU引用取得后解析auto，得到ResolvedPlan再走现有具体分支。原requested options与resolved options分别记录；不把path='auto'传入ANN循环。反馈函数由执行器在完成校验后调用，总deadline仍有效。 此任务同时加入SearchOptions的auto组合校验，但SQL服务在完整planner尚未注入时明确拒绝auto（adaptive_planner_unavailable），不提前公布能力。T5集成测试直接调用注入式execute_vector连接真实存储RPC，固定参考查询可经既有客户端；完整客户端auto端到端在T6验证，避免依赖尚未开放的入口。
 
-- [ ] RED：`test_auto_matches_selected_fixed_path_and_exact_truth`覆盖三种选择；`test_fixed_path_never_calls_planner_or_history`；`test_explain_peeks_without_scan_search_or_observation_update`；`test_analyze_and_shadow_execute_once`；`test_estimated_zero_still_checks_storage`；`test_failure_does_not_record_fast_success`（预算错误单独标记风险）。
-- [ ] 补RED：`test_clear_during_query_cannot_publish_warm_reuse_hint`、`test_cancel_corrupt_rpc_and_expired_lease_preserve_errors`；模型预计FF小集合但实际不同只能改变成本预测，不能截断真实结果。
-- [ ] 运行新文件，预期缺少auto入口/执行计划失败。
-- [ ] 接入规划、planner_ms/feedback_ms、完整adaptive诊断；原质量/设备/fallback顺序的抽取仅限复用需要。固定路径保留原行为；EXPLAIN缺失质量仍能显示排除原因但不执行；ANALYZE/实际执行的硬错误保持原语义。
-- [ ] 运行`python -m pytest -q tests/integration/test_adaptive_execution.py tests/integration/test_adaptive_failures.py tests/integration/test_data_cache_execution.py tests/integration/test_quality_profiles_rpc.py`，预期全通过，额外规划数据RPC=0。
-- [ ] 提交，建议`feat: execute adaptive plans with traceable decisions and unchanged fallbacks`。
+- [x] RED：`test_auto_matches_selected_fixed_path_and_exact_truth`覆盖三种选择；`test_fixed_path_never_calls_planner_or_history`；`test_explain_peeks_without_scan_search_or_observation_update`；`test_analyze_and_shadow_execute_once`；`test_estimated_zero_still_checks_storage`；`test_failure_does_not_record_fast_success`（预算错误单独标记风险）。
+- [x] 补RED：`test_clear_during_query_cannot_publish_warm_reuse_hint`、`test_cancel_corrupt_rpc_and_expired_lease_preserve_errors`；模型预计FF小集合但实际不同只能改变成本预测，不能截断真实结果。
+- [x] 运行新文件，预期缺少auto入口/执行计划失败。
+- [x] 接入规划、planner_ms/feedback_ms、完整adaptive诊断；原质量/设备/fallback顺序的抽取仅限复用需要。固定路径保留原行为；EXPLAIN缺失质量仍能显示排除原因但不执行；ANALYZE/实际执行的硬错误保持原语义。
+- [x] 运行`python -m pytest -q tests/integration/test_adaptive_execution.py tests/integration/test_adaptive_failures.py tests/integration/test_data_cache_execution.py tests/integration/test_quality_profiles_rpc.py`，预期全通过，额外规划数据RPC=0。
+- [x] 提交，建议`feat: execute adaptive plans with traceable decisions and unchanged fallbacks`。
 
 ## Task 6: 用户入口、部署上下文和能力确认
 
@@ -178,3 +178,5 @@ T1定义以下冻结对象（tuple/不可变映射；无存储文件句柄/可�
 - T3：同租约候选资格、逐路径质量解析、基数来源及缓存/风险观测输入完成；31项规划/既有质量测试通过（0.43秒）。补充缺失索引且显式fused时仍保留既有exact回退，失败复现后修复；此为不可执行ANN的结构性回退，不是成本驱动主动exact。
 
 - T4：候选轮次、RPC/字节、缓存及回退成本模型与风险分层完成；47项规划相关测试通过（0.48秒）。回退估计追加实际扫描/向量量但不重复BeginRead/EndRead。策略JSON可选parameters冻结切换差距、风险及内存预算；默认仍为设计值。规划契约另补任意冻结包装隐藏可变状态的失败测试并修复。
+
+- T5：内部auto执行及诊断/一次执行语义接入；60项执行器、缓存、质量、选项与观测回归通过（51.16秒）。反馈途中取消的失败测试暴露部分观测残留，已用最多4项带回滚的有界批提交修复；回滚恢复值/TTL及被淘汰项，不承诺还原本次get带来的LRU访问顺序。公开服务在T6配置完成前仍明确拒绝auto。

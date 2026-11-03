@@ -85,6 +85,35 @@ class ObservationStore:
     def note_budget_failure(self, key, now=None):
         self.record(Observation(key,{'budget_failure':True}),now)
 
+    def record_many(self, observations, now=None, check=lambda:None):
+        """Commit up to four scalar observations, rolling back on cancellation.
+
+        Rollback restores values/expiry and any evictions; recency may reflect
+        this request's accesses, just like get() during a failed query.
+        """
+        now=self._now(now);observations=tuple(observations)
+        if len(observations)>4:raise ValueError('Too many query observations')
+        with self._lock:
+            journal=[];check()
+            try:
+                for observation in observations:
+                    key=observation.key;previous=self._records.get(key);evicted=None
+                    if previous is None and len(self._records)>=self.max_entries:
+                        oldest=next(iter(self._records));evicted=(oldest,self._records[oldest])
+                    journal.append((key,previous,evicted))
+                    if key[0]=='cardinality':
+                        self.record_cardinality(key,observation.values['matched_rows'],now)
+                    else:self.record(observation,now)
+                check()
+            except BaseException:
+                for key,previous,evicted in reversed(journal):
+                    self._records.pop(key,None)
+                    if previous is not None:self._records[key]=previous
+                    if evicted is not None:
+                        self._records[evicted[0]]=evicted[1]
+                        self._records.move_to_end(evicted[0],last=False)
+                raise
+
     def stats(self):
         with self._lock:
             return dict(entries=len(self._records),accounted_bytes=len(self._records)*self.entry_charge,

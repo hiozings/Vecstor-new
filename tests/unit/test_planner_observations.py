@@ -104,3 +104,19 @@ def test_reuse_requires_same_query_budget_path_and_generations():
     assert make_reuse_observation(inputs,trace,snapshot,snapshot) is None
     trace['data_cache'].update(admitted_rows=6,bypass_rows=1)
     assert make_reuse_observation(inputs,trace,snapshot,snapshot) is None
+
+
+def test_record_many_rollback_restores_values_and_evictions():
+    store=ObservationStore(max_entries=2)
+    store.record(Observation(('a',),{'matched_rows':1}),now=0)
+    store.record(Observation(('b',),{'matched_rows':2}),now=0)
+    calls=[]
+    def check():
+        calls.append(1)
+        if len(calls)==2:raise RuntimeError('cancel')
+    with pytest.raises(RuntimeError,match='cancel'):
+        store.record_many([Observation(('a',),{'matched_rows':3}),Observation(('c',),{'warm':True})],now=1,check=check)
+    assert store.stats()['entries']==2
+    assert store.peek(('a',),now=2).values['matched_rows']==1
+    assert store.peek(('b',),now=2).values['matched_rows']==2
+    assert store.peek(('c',),now=2) is None

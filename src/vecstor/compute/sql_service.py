@@ -98,6 +98,8 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 yield from encode_result(output)
             elif plan.vector is not None:
                 options=resolve_execution_options(SearchOptions.from_proto(request.search_options),plan.settings)
+                if options.path=='auto' and not getattr(self,'_adaptive_ready',False):
+                    raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'adaptive_planner_unavailable')
                 if options.candidate_data_path=='fused' and not self.fused_candidates:
                     raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'Fused candidate reads are not enabled')
                 use_fused=self.fused_candidates and options.candidate_data_path!='separate'
