@@ -123,7 +123,7 @@ P4数据缓存与传输优化子阶段T1—T8已于2026-10-19按代表性实验�
 
 2026-10-23查询统计优化完成：[计划](docs/superpowers/plans/2026-10-23-cache-stats-snapshot.md)、[验收](docs/validation/cache-stats-snapshot.md)。新增锁内常数时间process快照，查询不再扫描缓存，显式分库管理统计仍按需遍历；无PYTHONPATH真实GPU全套841通过。针对既有CPU串行/8及64MiB容量退化完成前后72配置/13440查询、6720对结果与计数一致；64MiB暖态开启缓存P50由63.79降至41.31ms，仍保留关闭缓存控制与波动/退化。新增benchmarks/p4/cache_stats.py独立微基准，不将微基准收益外推全部负载。
 
-P4自适应查询策略下一子阶段已形成[详细设计](docs/design/p4-adaptive-query-strategy.md)和[八任务实施计划](docs/superpowers/plans/2026-10-23-p4-adaptive-query-strategy.md)，2026-11-03起实施。T1/T2契约、策略解析、scope快照及有界观测65项定向测试通过，初始真实GPU全套基线841通过；T3候选资格及质量绑定通过31项测试，T4纯成本/风险选择器及相关模块47项通过；T5内部执行接入60项相关回归通过；T6公开入口及能力确认已接入，真实GPU完整922项通过；正式校准与最终性能验收仍待完成。首期显式CPU path=auto，质量资格优先，结合完整谓词基数、候选相关性、RPC/字节及scope缓存证据作成本决策；不自动改变设备或ANN预算，不新增在线统计扫描。规划包含风险分层、冷启动退化、双节点/重启、完整策略质量及分级性能验收；设计阈值并非已测收益。
+P4自适应查询策略下一子阶段已形成[详细设计](docs/design/p4-adaptive-query-strategy.md)和[八任务实施计划](docs/superpowers/plans/2026-10-23-p4-adaptive-query-strategy.md)，2026-11-03起实施。T1/T2契约、策略解析、scope快照及有界观测65项定向测试通过，初始真实GPU全套基线841通过；T3候选资格及质量绑定通过31项测试，T4纯成本/风险选择器及相关模块47项通过；T5内部执行接入60项相关回归通过；T6公开入口及能力确认已接入，真实GPU完整922项通过；T7实验工具及T8小规模生命周期已接入；正式校准与最终性能验收仍待完成。首期显式CPU path=auto，质量资格优先，结合完整谓词基数、候选相关性、RPC/字节及scope缓存证据作成本决策；不自动改变设备或ANN预算，不新增在线统计扫描。规划包含风险分层、冷启动退化、双节点/重启、完整策略质量及分级性能验收；设计阈值并非已测收益。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -158,6 +158,7 @@ P4自适应查询策略下一子阶段已形成[详细设计](docs/design/p4-ada
 │   ├── check_gpu_ann.py  # 独立子进程GPU组件能力探测
 │   ├── check_gpu.py      # 真实GPU/PTY/双进程存储隔离和生命周期验收
 │   ├── check_p3.py       # CPU ANN 双路径、真实终端与隔离验收
+│   ├── check_p4_adaptive.py # 自适应双节点、PTY及重启验收
 │   ├── check_p4_cache.py # 缓存/投影真实终端、双节点/重启与隔离验收
 │   ├── check_p4_indexes.py # 双计算节点持久工件、重启与隔离生命周期验收
 │   └── generate_proto.py # 生成协议 Python 模块
@@ -204,6 +205,7 @@ P4自适应查询策略下一子阶段已形成[详细设计](docs/design/p4-ada
 │   ├── sql-shell.md      # P2.5 安装入口、界面、SQL 范围与使用方法
 │   ├── gpu-search.md     # GPU SQL、设备/资源、质量和故障说明
 │   ├── p3-search.md      # ANN 命令、资源/版本语义与实验复现
+│   ├── p4-adaptive.md    # CPU auto、策略校准、诊断与限制（验收中）
 │   ├── p4-cache.md       # 缓存/投影启动、会话控制、统计及限制（代表性验收完成）
 │   ├── p4-indexes.md     # 持久工件发布/加载、双节点、重启预热与回收
 │   ├── design/data-and-query-spec.md # P1 数据与查询契约
