@@ -235,12 +235,17 @@ class SessionClient:
         self.last_operation_id=operation_id or str(uuid.uuid4())
         request=pb.SQLRequest(database_id=self.database_id,sql=sql,operation_id=self.last_operation_id)
         effective=resolve_execution_options(self.search_options,plan.settings) if plan.kind=='vector' else self.search_options
+        needs_adaptive_ack=plan.kind=='vector' and effective.path=='auto'
         needs_device_ack=plan.kind=='vector' and (bool(plan.settings) or effective.device=='gpu')
         needs_data_ack=plan.kind=='vector' and effective.candidate_data_path!='default'
         needs_cache_ack=plan.kind=='vector' and effective.data_cache!='default'
         needs_projection_ack=plan.kind=='vector' and effective.metadata_projection!='default'
         if plan.kind == 'vector':
-            caps=self._query_capabilities() if needs_device_ack or effective.quality_profile_id or effective.candidate_data_path!='default' or needs_cache_ack or needs_projection_ack else None
+            caps=self._query_capabilities() if needs_device_ack or effective.quality_profile_id or effective.candidate_data_path!='default' or needs_cache_ack or needs_projection_ack or needs_adaptive_ack else None
+            if needs_adaptive_ack:
+                from vecstor.rpc.adaptive_codec import require_adaptive_capabilities
+                try:require_adaptive_capabilities(caps,effective)
+                except ValueError:self._invalidate_query_capabilities();raise
             if needs_device_ack and (type(caps.get('execution_settings_version')) is not int or caps['execution_settings_version']<1):
                 self._invalidate_query_capabilities()
                 raise ValueError('Compute service does not support SQL device settings')
@@ -276,6 +281,9 @@ class SessionClient:
                     if event["kind"]=="rows" and any(len(row)!=width for row in event["rows"]):
                         raise ValueError("Result row width differs from schema")
                     if event["kind"]=="complete":
+                        if needs_adaptive_ack:
+                            from vecstor.rpc.adaptive_codec import validate_adaptive_plan
+                            validate_adaptive_plan(event.get('execution_plan'),effective,caps)
                         if needs_device_ack:
                             execution=event.get('execution_plan') or {}
                             if execution.get('requested_device')!=effective.device or execution.get('actual_device') not in ('cpu','gpu','not_executed'):

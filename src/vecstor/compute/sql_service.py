@@ -20,8 +20,23 @@ from vecstor.rpc.sql_codec import encode_result
 
 
 class SQLComputeService(rpc.SQLComputeServicer):
-    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None,fused_candidates=False,index_source='local',data_cache_config=None,metadata_projection='full'):
+    def __init__(self, address, timeout=15, index_memory_mib=256, index_max_entries=8, quality_document=None,gpu_options=None,fused_candidates=False,index_source='local',data_cache_config=None,metadata_projection='full',adaptive_policy=None,adaptive_mode='apply',adaptive_network_class=None):
         if index_source not in ('local','published'): raise ValueError('Invalid index source')
+        from vecstor.query.adaptive_policy import AdaptivePolicy
+        from vecstor.compute.adaptive_context import ActiveVectorRequests, deployment_fingerprint
+        from vecstor.compute.planner_observations import ObservationStore
+        if adaptive_mode not in ('apply','shadow'):raise ValueError('Invalid adaptive mode')
+        if adaptive_policy is not None:
+            if not isinstance(adaptive_policy,AdaptivePolicy):raise ValueError('Invalid adaptive policy')
+            if index_source!='published':raise ValueError('Adaptive policy requires published indexes')
+            if not isinstance(adaptive_network_class,str) or not adaptive_network_class or len(adaptive_network_class)>64 or chr(0) in adaptive_network_class:
+                raise ValueError('Adaptive policy requires a valid network class')
+        self.adaptive_policy=adaptive_policy;self.adaptive_mode=adaptive_mode
+        self.adaptive_network_class=adaptive_network_class
+        self.adaptive_fingerprint=deployment_fingerprint() if adaptive_policy is not None else None
+        self.active_vectors=ActiveVectorRequests() if adaptive_policy is not None else None
+        self.observations=ObservationStore() if adaptive_policy is not None else None
+        self._adaptive_ready=True
         from vecstor.cache.types import CacheConfig
         from vecstor.cache.vector_cache import VersionedVectorCache
         self.data_cache=VersionedVectorCache(data_cache_config or CacheConfig())
@@ -80,6 +95,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
     def ExecuteSQL(self, request, context):
         deadline = time.monotonic() + min(context.time_remaining() or self.timeout, self.timeout)
         stream = None
+        tracked_vector=False
         started = time.monotonic()
         try:
             plan = classify_statement(request.sql)
@@ -97,6 +113,7 @@ class SQLComputeService(rpc.SQLComputeServicer):
                         output.update(selected_database_id=database["id"], selected_database_name=database["name"])
                 yield from encode_result(output)
             elif plan.vector is not None:
+                if self.active_vectors is not None:self.active_vectors.enter();tracked_vector=True
                 options=resolve_execution_options(SearchOptions.from_proto(request.search_options),plan.settings)
                 if options.path=='auto' and not getattr(self,'_adaptive_ready',False):
                     raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,'adaptive_planner_unavailable')
@@ -111,7 +128,10 @@ class SQLComputeService(rpc.SQLComputeServicer):
                 normalized=pb.SQLRequest.FromString(request.SerializeToString())
                 normalized.sql=plan.sql
                 output=execute_vector(self.stub,self.index_manager.registry,normalized,plan.vector,options,
-                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry,fused_candidates=use_fused,index_source=self.index_source,data_cache=self.data_cache,metadata_projection=projection,cache_enabled=cache_enabled)
+                                      context,deadline,explain=plan.explain,quality_catalog=self.quality_catalog,gpu_registry=self.index_manager.gpu_registry,fused_candidates=use_fused,index_source=self.index_source,data_cache=self.data_cache,metadata_projection=projection,cache_enabled=cache_enabled,
+                                      adaptive_policy=self.adaptive_policy,observations=self.observations,
+                                      deployment_context=(lambda:self.active_vectors.snapshot(self.adaptive_fingerprint,self.adaptive_network_class)) if self.active_vectors is not None else None,
+                                      adaptive_mode=self.adaptive_mode)
                 execution=output['execution_plan']
                 execution['counts']['storage_capability_rpc_calls']=control_cost['calls']
                 execution['counts']['rpc_calls']+=control_cost['calls']
@@ -142,11 +162,16 @@ class SQLComputeService(rpc.SQLComputeServicer):
         except ValueError as error:
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(error))
         finally:
+            if tracked_vector:self.active_vectors.leave()
             if stream is not None: stream.cancel()
 
     def GetSearchCapabilities(self,request,context):
         return pb.ControlResponse(json_result=json.dumps({'server_instance_id':self.server_instance_id,'fused_candidates':self.fused_candidates,'candidate_data_paths':['separate','fused'] if self.fused_candidates else ['separate'],'ann':True,'algorithm':'cpu_ivfflat',
-            'modes':['exact','approx'],'paths':['filter-first','search-first'],'plan_version':1,'gpu':True,'gpu_paths':['search-first'],'gpu_max_search_k':2048,'gpu_max_nprobe':2048,
+            'modes':['exact','approx'],'paths':['filter-first','search-first','auto'],'plan_version':1,'gpu':True,'gpu_paths':['search-first'],'gpu_max_search_k':2048,'gpu_max_nprobe':2048,
+            'adaptive_planning_version':1,'adaptive_devices':['cpu'],'adaptive_mode':self.adaptive_mode,
+            'adaptive_policy_id':self.adaptive_policy.policy_id if self.adaptive_policy else None,
+            'adaptive_policy_hash':self.adaptive_policy.policy_hash if self.adaptive_policy else None,
+            'adaptive_hardware_fingerprint':self.adaptive_fingerprint,'adaptive_network_class':self.adaptive_network_class,
             'data_cache_version':1,'metadata_projection_version':1,
             'data_cache_enabled':self.data_cache.config.max_bytes>0,'metadata_projection_default':self.metadata_projection,
             'execution_settings_version':1,'index_devices_version':1,'index_publication_version':1,

@@ -17,7 +17,7 @@ End SQL with ; then Enter. Multiple statements commit independently.
 .mode table|json          Select output format
 .timer on|off             Toggle elapsed time
 .search [reset|KEY VALUE] Show/reset search controls; mode exact|approx,
-                         path filter-first|search-first, nprobe, candidates,
+                         path filter-first|search-first|auto (CPU), nprobe, candidates,
                          max-candidates, max-rounds, fallback exact|error
 .search profiles          List calibrated profiles for this database
 .search profile ID|off    Select/disable a snapshot-bound quality profile

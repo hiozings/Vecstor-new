@@ -36,6 +36,9 @@ def main(argv=None):
     compute.add_argument("--index-max-entries",type=int,default=8)
     compute.add_argument('--index-source',choices=('local','published'),default='local')
     compute.add_argument('--index-preload',help='Explicit compute-owned preload JSON; no training')
+    compute.add_argument('--adaptive-policy',help='Compute-owned bounded adaptive policy JSON')
+    compute.add_argument('--adaptive-mode',choices=('apply','shadow'),default='apply')
+    compute.add_argument('--adaptive-network-class',help='Explicit network class matching cost calibration')
     compute.add_argument('--fused-candidates',action='store_true',help='Combine candidate filtering and vector reads (requires updated storage)')
     compute.add_argument('--gpu-index-memory-mib',type=int,default=512)
     compute.add_argument('--gpu-index-max-entries',type=int,default=8)
@@ -53,6 +56,13 @@ def main(argv=None):
                 if args.index_source!='published':raise ValueError('Index preload requires --index-source published')
                 from vecstor.compute.index_recovery import read_preload
                 targets=read_preload(args.index_preload,args.isolate_storage_dir)
+            adaptive_policy=None
+            if args.adaptive_policy:
+                path=Path(args.adaptive_policy).resolve(strict=True)
+                if args.isolate_storage_dir and path.is_relative_to(Path(args.isolate_storage_dir).resolve()):
+                    raise ValueError('Adaptive policy must be outside storage data root')
+                from vecstor.query.adaptive_policy import AdaptivePolicy
+                adaptive_policy=AdaptivePolicy.load(path)
             quality_document=None
             if args.quality_profiles:
                 path=Path(args.quality_profiles).resolve(strict=True)
@@ -72,7 +82,8 @@ def main(argv=None):
                                      scan_admission=args.data_cache_scan_admission=='on')
             from vecstor.compute.service import create_compute_server
             server, port, backend = create_compute_server(args.storage, args.listen, args.timeout, args.batch_rows,
-                                                        args.index_memory_mib,args.index_max_entries,quality_document,gpu_options,args.fused_candidates,args.index_source,cache_config,args.metadata_projection)
+                                                        args.index_memory_mib,args.index_max_entries,quality_document,gpu_options,args.fused_candidates,args.index_source,cache_config,args.metadata_projection,
+                                                        adaptive_policy,args.adaptive_mode,args.adaptive_network_class)
             if targets:
                 try:
                     from vecstor.compute.index_recovery import preload_indexes

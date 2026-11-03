@@ -73,7 +73,7 @@ def adaptive(cached, adaptive_document):
             adaptive_policy=policy or policy_for(options,winner,matched_rows),observations=observations,
             deployment_context=context,adaptive_mode=mode)
     return SimpleNamespace(run=run,policy_for=policy_for,observations=observations,cached=cached,plan=plan,
-                           catalog=catalog,read_settings=read,context=context,descriptor=descriptor)
+                           catalog=catalog,quality_document=dict(format_version=3,profiles=profiles),read_settings=read,context=context,descriptor=descriptor)
 
 
 @pytest.mark.parametrize('winner',['ann-filter','ann-search','exact'])
@@ -142,3 +142,15 @@ def test_clear_during_query_cannot_publish_warm_reuse_hint(adaptive,monkeypatch)
     adaptive.run();second=adaptive.run()
     selected=next(e for e in second['execution_plan']['adaptive']['estimates'] if e['candidate_id']=='ann-search')
     assert selected['vectors_missed']>0
+
+
+def test_planner_timer_includes_adapter_import(adaptive,monkeypatch):
+    import builtins
+    original=builtins.__import__;delayed=[]
+    def importing(name,*args,**kwargs):
+        if name=='vecstor.compute.adaptive_execution' and not delayed:
+            delayed.append(True);time.sleep(.01)
+        return original(name,*args,**kwargs)
+    monkeypatch.setattr(builtins,'__import__',importing)
+    result=adaptive.run()
+    assert delayed and result['execution_plan']['adaptive']['planner_ms']>=8

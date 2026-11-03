@@ -129,11 +129,11 @@ T1定义以下冻结对象（tuple/不可变映射；无存储文件句柄/可�
 
 **Interfaces:** 启动`--adaptive-policy`、`--adaptive-mode apply|shadow`、`--adaptive-network-class`；`.search path auto`及SQL SETTINGS path='auto'复用原SearchOptions.path字符串，无新请求proto字段。`SQLComputeService`提供finally安全的活跃向量计数和只读部署快照，auto规划前读取；质量与成本上下文匹配由T3处理。
 
-- [ ] RED：验证auto+exact、auto+approx/CPU、auto+GPU拒绝、fused+auto只选SF、默认不变；`test_session_auto_checks_capability_without_settings`；`test_old_server_or_restarted_instance_cannot_fake_auto_ack`；`test_missing_adaptive_completion_is_error`；`test_ordinary_sql_does_not_require_adaptive_ack`。
-- [ ] RED：`test_planned_exact_keeps_requested_quality_ack`覆盖内部profile清空但完成帧仍确认原requested_id；`test_active_count_includes_fixed_and_returns_to_zero_on_all_exits`，用屏障协调1个auto与2个fixed，快照=3/bucket4；失败、取消、EXPLAIN结束不泄漏；`test_missing_network_label_and_bad_policy_fail_startup`；`test_context_mismatch_keeps_quality_but_disables_cost`。
-- [ ] 运行对应单元/集成文件，记录失败；再在T5内部契约与未就绪拒绝保护上实现参数/加载/Landlock顺序、SQL与会话覆盖、补全/帮助及能力缓存失效。策略启用才启用额外活跃计数，fixed无规划和观测写入。
-- [ ] 重跑上述测试，外加现有`test_data_cache_controls.py`和GPU执行测试；预期原GPU固定路径不受影响；同地址重启需重新确认策略ID/mode。
-- [ ] 在此集成点运行一次`VECSTOR_REQUIRE_GPU=1 python -m pytest -q`完整回归，预期零失败/跳过；随后提交，建议`feat: expose opt-in adaptive CPU planning with capability acknowledgements`。
+- [x] RED：验证auto+exact、auto+approx/CPU、auto+GPU拒绝、fused+auto只选SF、默认不变；`test_session_auto_checks_capability_without_settings`；`test_old_server_or_restarted_instance_cannot_fake_auto_ack`；`test_missing_adaptive_completion_is_error`；`test_ordinary_sql_does_not_require_adaptive_ack`。
+- [x] RED：`test_planned_exact_keeps_requested_quality_ack`覆盖内部profile清空但完成帧仍确认原requested_id；`test_active_count_includes_fixed_and_returns_to_zero_on_all_exits`，用屏障协调1个auto与2个fixed，快照=3/bucket4；失败、取消、EXPLAIN结束不泄漏；`test_missing_network_label_and_bad_policy_fail_startup`；`test_context_mismatch_keeps_quality_but_disables_cost`。
+- [x] 运行对应单元/集成文件，记录失败；再在T5内部契约与未就绪拒绝保护上实现参数/加载/Landlock顺序、SQL与会话覆盖、补全/帮助及能力缓存失效。策略启用才启用额外活跃计数，fixed无规划和观测写入。
+- [x] 重跑上述测试，外加现有`test_data_cache_controls.py`和GPU执行测试；预期原GPU固定路径不受影响；同地址重启需重新确认策略ID/mode。
+- [x] 在此集成点运行一次`VECSTOR_REQUIRE_GPU=1 python -m pytest -q`完整回归，预期零失败/跳过；随后提交，建议`feat: expose opt-in adaptive CPU planning with capability acknowledgements`。
 
 ## Task 7: 独立校准、冻结策略和配对实验工具
 
@@ -180,3 +180,5 @@ T1定义以下冻结对象（tuple/不可变映射；无存储文件句柄/可�
 - T4：候选轮次、RPC/字节、缓存及回退成本模型与风险分层完成；47项规划相关测试通过（0.48秒）。回退估计追加实际扫描/向量量但不重复BeginRead/EndRead。策略JSON可选parameters冻结切换差距、风险及内存预算；默认仍为设计值。规划契约另补任意冻结包装隐藏可变状态的失败测试并修复。
 
 - T5：内部auto执行及诊断/一次执行语义接入；60项执行器、缓存、质量、选项与观测回归通过（51.16秒）。反馈途中取消的失败测试暴露部分观测残留，已用最多4项带回滚的有界批提交修复；回滚恢复值/TTL及被淘汰项，不承诺还原本次get带来的LRU访问顺序。公开服务在T6配置完成前仍明确拒绝auto。
+
+- T6：公开启动/SQL/会话auto入口、部署指纹/活跃计数及能力/完成帧确认完成；51项定向（含真实GPU）通过，集成全套922通过（623.47秒，零失败/跳过，无PYTHONPATH）。校验全套运行前后业务源码SHA一致。规划计时覆盖适配器加载，实例变化拒绝旧确认；模型成本及正式质量尚未校准。新增adaptive_context.py与rpc/adaptive_codec.py分别隔离部署与确认逻辑。

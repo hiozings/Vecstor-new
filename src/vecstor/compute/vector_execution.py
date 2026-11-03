@@ -113,15 +113,15 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
             trace['index_load_state']='ready' if entry else reason
             quality_problem=None
             if was_auto:
+                planner_started=time.monotonic()
                 from vecstor.compute.adaptive_execution import prepare_adaptive, effective_read_settings
                 from vecstor.compute.planner_types import DeploymentContext, plain
-                planner_started=time.monotonic()
                 io.configure_cache_lease();deadline=io.deadline
                 read_settings=effective_read_settings(plan,data_cache,reader.enabled,metadata_projection,fused_candidates)
                 try:
                     adaptive_inputs,adaptive_resolved,description=prepare_adaptive(plan,options,lease,entry,
                         quality_catalog,adaptive_policy,observations,data_cache,read_settings,
-                        deployment_context or DeploymentContext(None,None,1),io.remaining()*1000,
+                        (deployment_context() if callable(deployment_context) else deployment_context) or DeploymentContext(None,None,1),io.remaining()*1000,
                         explain=explain=='plan',mode=adaptive_mode)
                 except (RemoteError,ArtifactError) as error:
                     if explain!='plan':raise
@@ -288,9 +288,11 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
     finally:io.close()
     if reader is not None:trace['data_cache']=reader.describe()
     if adaptive_inputs is not None and explain!='plan':
+        feedback_started=time.monotonic()
         from vecstor.compute.adaptive_execution import finish_adaptive
         finish_adaptive(adaptive_inputs,adaptive_resolved,trace,data_cache,observations,
                         (time.monotonic()-started)*1000,io.remaining)
+        trace['adaptive']['feedback_ms']=(time.monotonic()-feedback_started)*1000
     if index_source=='published' and trace['actual_mode']=='approx':
         trace.update(artifact_id=descriptor.artifact_id,payload_sha256=descriptor.payload_sha256)
     trace['compute_elapsed_ms']=(time.monotonic()-started)*1000

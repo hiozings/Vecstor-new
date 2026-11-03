@@ -29,7 +29,7 @@ def cached(tmp_path):
         save_dataset(generate_dataset(2048,4,seed=27),tmp_path/'imports/source.npz');client.import_dataset('source.npz','items')
         client.publish_index('items',nlist=1,operation_id='first');client.load_index('items')
         client.search_options=SearchOptions(mode='approx',path='search-first',nprobe=1,fallback='error')
-        yield SimpleNamespace(client=client,compute=compute.sql,backend=backend,root=tmp_path,address=f'127.0.0.1:{port}')
+        yield SimpleNamespace(client=client,compute=compute.sql,backend=backend,root=tmp_path,address=f'127.0.0.1:{port}',storage_address=f'127.0.0.1:{sport}')
 
 
 def test_cold_warm_queries_save_actual_vector_rpc(cached):
