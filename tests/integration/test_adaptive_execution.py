@@ -43,8 +43,9 @@ def adaptive(cached, adaptive_document):
     context=DeploymentContext('hardware','loopback',1)
     read=effective_read_settings(plan,service.data_cache,True,'projected',False)
 
-    def policy_for(options, winner='ann-search', matched_rows=2048):
+    def policy_for(options, winner='ann-search', matched_rows=2048, parameters=None):
         document=deepcopy(adaptive_document);work=document['workloads'][0]
+        if parameters is not None:document['parameters']=parameters
         work.update(data_identity={k:v for k,v in descriptor['key'].items() if k!='build_fingerprint'},
             artifact_identity=dict(artifact_id=descriptor['artifact_id'],payload_sha256=descriptor['payload_sha256'],
                                    build_fingerprint=descriptor['key']['build_fingerprint']),
@@ -154,3 +155,12 @@ def test_planner_timer_includes_adapter_import(adaptive,monkeypatch):
     monkeypatch.setattr(builtins,'__import__',importing)
     result=adaptive.run()
     assert delayed and result['execution_plan']['adaptive']['planner_ms']>=8
+
+
+def test_observation_ablation_keeps_physical_cache_reads(adaptive):
+    options=SearchOptions(mode='approx',path='auto')
+    policy=adaptive.policy_for(options,parameters={'use_observations':False})
+    cold=adaptive.run(options,policy=policy);warm=adaptive.run(options,policy=policy)
+    assert cold['rows']==warm['rows']
+    assert warm['execution_plan']['counts']['vectors_fetched']==0
+    assert adaptive.observations.stats()['entries']==0

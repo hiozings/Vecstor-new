@@ -25,3 +25,13 @@ def test_policy_loading_before_landlock_imports_only_stdlib():
         "import sys; from vecstor.query.adaptive_policy import AdaptivePolicy; "
         "assert not ({'numpy','faiss','grpc','duckdb'} & set(sys.modules))"],capture_output=True,text=True)
     assert run.returncode==0,run.stderr
+
+
+def test_deployment_fingerprint_binds_runtime_source(monkeypatch):
+    from vecstor.compute import adaptive_context
+    monkeypatch.setenv('OMP_NUM_THREADS','1');monkeypatch.setenv('OPENBLAS_NUM_THREADS','1')
+    monkeypatch.setattr(adaptive_context,'runtime_source_fingerprint',lambda:'a'*64,raising=False)
+    before=adaptive_context.deployment_fingerprint()
+    monkeypatch.setattr(adaptive_context,'runtime_source_fingerprint',lambda:'b'*64)
+    after=adaptive_context.deployment_fingerprint()
+    assert before and after and before!=after

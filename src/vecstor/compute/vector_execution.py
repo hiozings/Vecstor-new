@@ -61,6 +61,8 @@ def execute_vector(stub,registry,request,plan,options,context,deadline,explain=N
                  published_index_state=None,index_load_state=None)
     reader=None
     was_auto=options.path=='auto'
+    if was_auto and adaptive_policy is not None and not adaptive_policy.parameters['use_observations']:
+        observations=None
     adaptive_inputs=adaptive_resolved=None
     adaptive_fallback=adaptive_error=None
     if was_auto and options.mode=='approx':

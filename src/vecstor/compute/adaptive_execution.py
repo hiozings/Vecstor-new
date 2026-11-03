@@ -34,7 +34,8 @@ def prepare_adaptive(plan, options, lease, entry, catalog, policy, observations,
     decision=choose_plan(inputs,policy,mode)
     selected=next(c for c in candidates if c.candidate_id==decision.executed_id)
     description=dict(version=1,requested_path='auto',policy_id=inputs.policy_id,policy_hash=inputs.policy_hash,
-        mode=mode,decision_reason=decision.reason,reference_plan=decision.reference_id,
+        mode=mode,parameters=dict(policy.parameters) if policy else {},deployment_context=plain(context),
+        concurrency_bucket=context.concurrency_bucket,decision_reason=decision.reason,reference_plan=decision.reference_id,
         proposed_plan=decision.proposed_id,executed_plan=decision.executed_id,
         estimates=plain(decision.estimates),scope=plain(scope),artifact_identity=plain(inputs.artifact_identity),
         matched_rows=inputs.statistics['matched_rows'],cardinality_source=inputs.statistics['cardinality_source'],

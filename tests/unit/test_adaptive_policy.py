@@ -108,3 +108,21 @@ def test_arbitrary_frozen_wrapper_cannot_hide_mutable_planning_state():
     class Wrapper:
         mutable: list
     with pytest.raises(TypeError):freeze(Wrapper([1]))
+
+
+def test_owned_frozen_mapping_is_reused_without_recursively_copying():
+    from vecstor.compute.planner_types import freeze
+    source={'models':[{'coefficients':{'payload_bytes':1.}}]}
+    frozen=freeze(source)
+    assert freeze(frozen) is frozen
+    source['models'][0]['coefficients']['payload_bytes']=2.
+    assert frozen['models'][0]['coefficients']['payload_bytes']==1.
+    with pytest.raises(TypeError):frozen['models'][0]['coefficients']['payload_bytes']=3.
+
+
+def test_ablation_parameters_are_explicit_booleans(adaptive_document):
+    adaptive_document['parameters']={'use_observations':False,'include_transfer_cost':False}
+    policy=AdaptivePolicy.from_document(adaptive_document)
+    assert policy.parameters['use_observations'] is False
+    adaptive_document['parameters']['use_observations']=0
+    with pytest.raises(ValueError):AdaptivePolicy.from_document(adaptive_document)

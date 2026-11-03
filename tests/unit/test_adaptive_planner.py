@@ -148,3 +148,32 @@ def test_forecasts_and_choices_are_bounded_and_deterministic(adaptive_document):
             assert 0<=estimate.components['unique_candidates']<=256
             assert len(estimate.components['rounds'])<=3
             assert 0<=estimate.lower_ms<=estimate.mean_ms<=estimate.upper_ms
+
+
+def test_exact_fallback_forecast_is_reused_only_within_one_decision(adaptive_document,monkeypatch):
+    from vecstor.compute import adaptive_planner
+    original=adaptive_planner.forecast_features;calls=[]
+    def counted(candidate,*args,**kwargs):
+        if candidate.mode=='exact':calls.append(kwargs.get('common_calls',2))
+        return original(candidate,*args,**kwargs)
+    monkeypatch.setattr(adaptive_planner,'forecast_features',counted)
+    data=inputs(adaptive_document,matched=1000,fallback='exact')
+    choose_plan(data,None)
+    assert sorted(calls)==[0,2]
+    choose_plan(data,None)
+    assert sorted(calls)==[0,0,2,2]
+
+
+def test_cost_input_ablations_do_not_change_candidate_options(adaptive_document):
+    from types import SimpleNamespace
+    from vecstor.query.adaptive_policy import DEFAULT_PARAMETERS
+    data=inputs(adaptive_document,coefficients={'intercept':1.,'payload_bytes':.001,'rpc_calls':1.})
+    candidate=data.candidates[1]
+    warm=replace(data,statistics=dict(data.statistics,warm={'ann-search':True}))
+    disabled=lambda **values:SimpleNamespace(parameters=dict(DEFAULT_PARAMETERS,**values))
+    assert estimate_candidate(candidate,warm,disabled(use_cache_evidence=False)).vectors_missed>0
+    omitted=estimate_candidate(candidate,data,disabled(include_transfer_cost=False))
+    assert omitted.mean_ms==1. and omitted.rpc_calls>0 and omitted.payload_bytes>0
+    independent=estimate_candidate(candidate,data,disabled(use_candidate_correlation=False))
+    assert independent.vectors_reranked!=estimate_candidate(candidate,data,None).vectors_reranked
+    assert candidate.options==data.candidates[1].options

@@ -16,14 +16,14 @@ def failure_upper(attempts, failures):
     return (p+z*z/(2*attempts)+z*math.sqrt(p*(1-p)/attempts+z*z/(4*attempts**2)))/(1+z*z/attempts)
 
 
-def forecast_features(candidate, inputs, model, *, common_calls=2):
+def forecast_features(candidate, inputs, model, *, common_calls=2, use_cache_evidence=True, use_candidate_correlation=True):
     """Keep request counts conservative when the within-batch miss layout is unknown."""
     options=candidate.options;stats=inputs.statistics;read=stats.get('read_settings',{})
     m=stats['matched_rows'];n=inputs.table_rows;d=inputs.dimension
     measured=model['statistics'];snapshot=inputs.cache_snapshot
     cache=bool(read.get('cache_enabled') and snapshot.get('max_bytes',0)>0 and not snapshot.get('closed',False)
                and snapshot.get('active_workspaces',0)<snapshot.get('workspace_slots',0))
-    hit=float(cache and snapshot.get('scope_entry_count',0)>0 and stats.get('warm',{}).get(candidate.candidate_id,False))
+    hit=float(use_cache_evidence and cache and snapshot.get('scope_entry_count',0)>0 and stats.get('warm',{}).get(candidate.candidate_id,False))
     batch=min(1024,(1024**2)//(4*d));rounds=[];unique=passed=ann_work=ann_candidates=0.
     filters=vector_calls=0;vectors=0.;scan_calls=0
     predicted_exact=(candidate.mode=='exact' or (candidate.path=='filter-first' and
@@ -41,6 +41,7 @@ def forecast_features(candidate, inputs, model, *, common_calls=2):
         if candidate.path=='filter-first':scan_calls=1
         for number in range(options.max_rounds):
             q=1. if candidate.path=='filter-first' else measured['q'][min(number,len(measured['q'])-1)]
+            if candidate.path=='search-first' and not use_candidate_correlation:q=m/n if n else 0.
             fraction=measured['unique_fractions'][min(number,len(measured['unique_fractions'])-1)]
             added=min(pool-unique,budget-unique,length*fraction)
             found=min(m-passed,added*q)
@@ -78,21 +79,32 @@ def forecast_features(candidate, inputs, model, *, common_calls=2):
     return features,details,workspace,vectors,misses
 
 
-def estimate_candidate(candidate, inputs, policy, *, _common_calls=2):
+def estimate_candidate(candidate, inputs, policy, *, _common_calls=2, _memo=None):
+    memo={} if _memo is None else _memo
+    key=(candidate.candidate_id,candidate.execution_fingerprint,_common_calls)
+    if key not in memo:
+        memo[key]=_estimate_candidate(candidate,inputs,policy,_common_calls=_common_calls,_memo=memo)
+    return memo[key]
+
+
+def _estimate_candidate(candidate, inputs, policy, *, _common_calls=2, _memo=None):
     model=next((m for m in inputs.statistics.get('models',()) if
         m['candidate_id']==candidate.candidate_id and m['execution_fingerprint']==candidate.execution_fingerprint),None)
-    unknown=CandidateEstimate(candidate.candidate_id,reason='insufficient_cost_evidence')
+    def unknown(reason='insufficient_cost_evidence',**values):
+        return CandidateEstimate(candidate.candidate_id,reason=reason,**values)
     if model is None or inputs.table_rows is None or inputs.statistics.get('matched_rows') is None:
-        return unknown
-    if candidate.mode=='approx' and not inputs.statistics.get('nlist'):return unknown
+        return unknown()
+    if candidate.mode=='approx' and not inputs.statistics.get('nlist'):return unknown()
     evidence=model['evidence']
     if evidence['median_relative_error']>.2 or evidence['p90_relative_error']>.4:
-        return replace(unknown,reason='cost_validation_failed')
+        return unknown(reason='cost_validation_failed')
     parameters=getattr(policy,'parameters',DEFAULT_PARAMETERS)
-    features,details,workspace,vectors,misses=forecast_features(candidate,inputs,model,common_calls=_common_calls)
+    features,details,workspace,vectors,misses=forecast_features(candidate,inputs,model,common_calls=_common_calls,
+        use_cache_evidence=parameters['use_cache_evidence'],use_candidate_correlation=parameters['use_candidate_correlation'])
     if workspace>parameters['filter_workspace_bytes']:
-        return replace(unknown,eligible=False,reason='filter_working_set_budget',workspace_bytes=workspace,components=details)
-    mean=sum(features[key]*value for key,value in model['coefficients'].items())
+        return unknown(eligible=False,reason='filter_working_set_budget',workspace_bytes=workspace,components=details)
+    mean=sum(features[key]*value for key,value in model['coefficients'].items()
+             if parameters['include_transfer_cost'] or key not in ('rpc_calls','payload_bytes'))
     rpc=features['rpc_calls'];payload=features['payload_bytes']
     details['base_rpc_calls']=rpc
     residual=max(model['residual_ms'],inputs.statistics.get('residual_ms',{}).get(candidate.candidate_id,0.))
@@ -106,9 +118,9 @@ def estimate_candidate(candidate, inputs, policy, *, _common_calls=2):
         exact=next((c for c in inputs.candidates if c.mode=='exact'),None)
         # Unknown fallback costs cannot be treated as free, even with no observed failures.
         if exact is None:
-            return replace(unknown,reason='fallback_cost_unknown',components=details)
-        remaining=estimate_candidate(exact,inputs,policy,_common_calls=0)
-        if remaining.mean_ms is None:return replace(unknown,reason='fallback_cost_unknown',components=details)
+            return unknown(reason='fallback_cost_unknown',components=details)
+        remaining=estimate_candidate(exact,inputs,policy,_common_calls=0,_memo=_memo)
+        if remaining.mean_ms is None:return unknown(reason='fallback_cost_unknown',components=details)
         probability=1. if details['forecast_exhausted'] or not attempts else failures/attempts
         mean+=probability*remaining.mean_ms
         upper+=(risk if risk is not None else 1.)*remaining.upper_ms
@@ -118,7 +130,7 @@ def estimate_candidate(candidate, inputs, policy, *, _common_calls=2):
         details.update(fallback_probability=probability,fallback_remaining_ms=remaining.mean_ms,
                        fallback_rpc_calls=remaining.rpc_calls)
     if not all(math.isfinite(v) and v>=0 for v in (mean,lower,upper)):
-        return replace(unknown,reason='nonfinite_cost')
+        return unknown(reason='nonfinite_cost')
     upper=max(upper,mean);lower=min(lower,mean)
     return CandidateEstimate(candidate.candidate_id,mean_ms=mean,lower_ms=lower,upper_ms=upper,
         rpc_calls=rpc,payload_bytes=payload,vectors_reranked=vectors,
@@ -128,7 +140,8 @@ def estimate_candidate(candidate, inputs, policy, *, _common_calls=2):
 def choose_plan(inputs, policy, mode='apply'):
     if mode not in ('apply','shadow'):raise ValueError('Invalid adaptive mode')
     if inputs.remaining_ms<=0:raise RemoteError(grpc.StatusCode.DEADLINE_EXCEEDED,'Query deadline exceeded')
-    estimates=tuple(estimate_candidate(c,inputs,policy) for c in inputs.candidates)
+    memo={}
+    estimates=tuple(estimate_candidate(c,inputs,policy,_memo=memo) for c in inputs.candidates)
     by_id={e.candidate_id:e for e in estimates}
     eligible=[c for c in inputs.candidates if by_id[c.candidate_id].eligible]
     if not eligible:raise RemoteError(grpc.StatusCode.RESOURCE_EXHAUSTED,'adaptive_working_set_budget')

@@ -9,9 +9,28 @@ from vecstor.cache.types import DataScope
 from vecstor.query.search_options import SearchOptions
 
 
+class FrozenMap(Mapping):
+    """Owned immutable mapping; safe to share in subsequent planning snapshots."""
+    __slots__=('_items',)
+
+    def __init__(self, values):
+        object.__setattr__(self,'_items',MappingProxyType({key:freeze(value) for key,value in values.items()}))
+
+    def __setattr__(self, name, value):raise TypeError('Immutable planning mapping')
+    def __getitem__(self, key):return self._items[key]
+    def __iter__(self):return iter(self._items)
+    def __len__(self):return len(self._items)
+    def get(self, key, default=None):return self._items.get(key,default)
+    def items(self):return self._items.items()
+    def keys(self):return self._items.keys()
+    def values(self):return self._items.values()
+
+
 def freeze(value):
+    if value is None or type(value) in (str, int, float, bool):return value
+    if isinstance(value,FrozenMap):return value
     if isinstance(value, Mapping):
-        return MappingProxyType({key: freeze(item) for key, item in value.items()})
+        return FrozenMap(value)
     if isinstance(value, (list, tuple)):
         return tuple(freeze(item) for item in value)
     if value is None or type(value) in (str, int, float, bool):
@@ -22,6 +41,7 @@ def freeze(value):
 
 
 def plain(value):
+    if value is None or type(value) in (str, int, float, bool):return value
     if is_dataclass(value):
         return {field.name: plain(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):
@@ -38,8 +58,9 @@ def fingerprint(value):
 
 class FrozenValues:
     def __post_init__(self):
-        for field in fields(self):
-            object.__setattr__(self, field.name, freeze(getattr(self, field.name)))
+        for name,value in vars(self).items():
+            if value is not None and type(value) not in (str,int,float,bool):
+                object.__setattr__(self,name,freeze(value))
 
 
 @dataclass(frozen=True)

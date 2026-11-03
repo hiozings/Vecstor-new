@@ -1,6 +1,8 @@
 """Resolve legal candidates using already pinned artifacts and the same lease."""
 from dataclasses import replace
+from types import SimpleNamespace
 import hashlib
+import json
 
 import grpc
 import numpy as np
@@ -21,7 +23,16 @@ def artifact_identity(entry):
 
 
 def execution_signature(options, read_settings=None):
-    return fingerprint(dict(options=options.to_dict(),read_settings=read_settings or {}))
+    options.validate()
+    values={key:getattr(options,key) for key in options.__dataclass_fields__};effective=dict(read_settings or {})
+    if read_settings is not None:
+        for key in ('data_cache','metadata_projection','candidate_data_path'):values.pop(key)
+        if options.path!='search-first':effective['fused_candidates']=False
+    if options.mode=='exact':
+        for key in ('nprobe','candidates','max_candidates','max_rounds','quality_profile_id','fallback'):
+            values.pop(key)
+    return hashlib.sha256(json.dumps(dict(options=values,read_settings=effective),sort_keys=True,
+                                     separators=(',',':'),allow_nan=False).encode()).hexdigest()
 
 
 def qualify_candidates(plan, options, lease, pinned_cpu_entry, quality_catalog, policy_match,
@@ -81,15 +92,16 @@ def collect_planning_inputs(plan, lease, entry, candidates, policy_match, policy
     n=lease.row_count if lease.HasField('row_count') else None
     mismatch=policy_match.table_rows is not None and policy_match.table_rows!=n
     matched=None if mismatch else policy_match.matched_rows
-    statistics=dict(matched_rows=matched,cardinality_source='offline' if matched is not None else 'unknown',
+    identity=artifact_identity(entry)
+    statistics=dict(_scope_hash=fingerprint(scope),_artifact_hash=fingerprint(identity),
+        matched_rows=matched,cardinality_source='offline' if matched is not None else 'unknown',
         nlist=entry.handle.nlist if entry else None,models=() if mismatch else policy_match.models,
         cost_reason='table_row_count_mismatch' if mismatch else policy_match.cost_reason,
         read_settings=read_settings or {},exclusions=diagnostics or {},warm={},risk_unknown={})
-    inputs=PlanningInputs(scope,artifact_identity(entry),n,lease.dimension,plan.limit,
-        hashlib.sha256(plan.metadata_sql.encode()).hexdigest(),
-        hashlib.sha256(np.asarray(plan.query_vector,dtype='<f4').tobytes()).hexdigest(),
-        candidates,candidates[0].candidate_id,statistics,cache_snapshot,deployment_context,
-        policy.policy_id if policy else None,policy.policy_hash if policy else None,remaining_ms)
+    metadata_hash=hashlib.sha256(plan.metadata_sql.encode()).hexdigest()
+    query_hash=hashlib.sha256(np.asarray(plan.query_vector,dtype='<f4').tobytes()).hexdigest()
+    inputs=SimpleNamespace(scope=scope,artifact_identity=identity,metadata_sql_hash=metadata_hash,
+        query_hash=query_hash,k=plan.limit,statistics=statistics)
     if observation_store is not None:
         lookup=observation_store.peek if explain else observation_store.get
         card=lookup(observation_key(inputs,'cardinality'))
@@ -108,4 +120,6 @@ def collect_planning_inputs(plan, lease, entry, candidates, policy_match, policy
             statistics['risk_unknown'][candidate.candidate_id]=bool(risk and risk.values.get('budget_failure'))
             residual=lookup(observation_key(inputs,'cost',candidate))
             if residual:statistics.setdefault('residual_ms',{})[candidate.candidate_id]=residual.values.get('residual_ms',0.)
-    return replace(inputs,statistics=statistics)
+    return PlanningInputs(scope,identity,n,lease.dimension,plan.limit,metadata_hash,query_hash,
+        candidates,candidates[0].candidate_id,statistics,cache_snapshot,deployment_context,
+        policy.policy_id if policy else None,policy.policy_hash if policy else None,remaining_ms)

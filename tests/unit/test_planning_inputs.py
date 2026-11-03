@@ -122,3 +122,13 @@ def test_observed_cardinality_conflict_disables_offline_shortcut(qualification):
     conflicted=collect()
     assert conflicted.statistics['matched_rows'] is None
     assert conflicted.statistics['cardinality_source']=='conflict'
+
+
+def test_effective_read_aliases_share_execution_signature():
+    from vecstor.compute.planning_inputs import execution_signature
+    options=SearchOptions(mode='approx',path='search-first')
+    read=dict(cache_enabled=True,metadata_projection='projected',fused_candidates=False)
+    explicit=replace(options,data_cache='on',metadata_projection='projected',candidate_data_path='separate')
+    assert execution_signature(options,read)==execution_signature(explicit,read)
+    assert execution_signature(options,read)!=execution_signature(options,dict(read,cache_enabled=False))
+    assert execution_signature(SearchOptions(),read)==execution_signature(SearchOptions(nprobe=4,candidates=64),read)

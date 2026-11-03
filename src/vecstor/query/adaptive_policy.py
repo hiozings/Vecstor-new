@@ -12,7 +12,8 @@ from vecstor.query.search_options import validate_profile_id
 
 MAX_BYTES = 2*1024**2
 DEFAULT_PARAMETERS = MappingProxyType(dict(switch_min_ms=2., switch_margin=.1,
-    risk_limit=.01, filter_workspace_bytes=64*1024**2))
+    risk_limit=.01, filter_workspace_bytes=64*1024**2, use_cache_evidence=True,
+    include_transfer_cost=True, use_candidate_correlation=True, use_observations=True))
 FEATURES = ('intercept', 'scan_rows', 'metadata_rows', 'candidate_rows', 'ann_work',
             'ann_candidates', 'selector_rows', 'rerank_values', 'cache_lookup_rows',
             'cache_copy_bytes', 'cache_admit_bytes', 'rpc_calls', 'payload_bytes')
@@ -104,7 +105,7 @@ class AdaptivePolicy:
         self.policy_hash = fingerprint(document)
         self.parameters = freeze(dict(DEFAULT_PARAMETERS, **document.get('parameters',{})))
         self._workloads = MappingProxyType({self._key(w['data_identity'],w['metadata_sql'],w['k']): freeze(w)
-                                           for w in document['workloads']})
+                                           for w in self._document['workloads']})
 
     @staticmethod
     def _key(identity, sql, k):
@@ -131,7 +132,9 @@ class AdaptivePolicy:
         if not isinstance(parameters,dict) or not set(parameters).issubset(DEFAULT_PARAMETERS):
             raise ValueError('Invalid planner parameters')
         for key,number in parameters.items():
-            if key=='filter_workspace_bytes':_int(number,1,2**40)
+            if type(DEFAULT_PARAMETERS[key]) is bool:
+                if type(number) is not bool:raise ValueError('Invalid ablation parameter')
+            elif key=='filter_workspace_bytes':_int(number,1,2**40)
             else:_number(number,0,1000 if key=='switch_min_ms' else 1)
         if type(value['format_version']) is not int or value['format_version'] != 1:
             raise ValueError('Unsupported adaptive policy version')

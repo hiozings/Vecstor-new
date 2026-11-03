@@ -121,9 +121,10 @@ class ObservationStore:
 
 
 def observation_key(inputs, kind, candidate=None):
-    key=(kind,fingerprint(inputs.scope),inputs.metadata_sql_hash)
+    statistics=getattr(inputs,'statistics',{})
+    key=(kind,statistics.get('_scope_hash') or fingerprint(inputs.scope),inputs.metadata_sql_hash)
     if kind!='cardinality':
-        key+=(fingerprint(inputs.artifact_identity),str(inputs.k),candidate.execution_fingerprint)
+        key+=(statistics.get('_artifact_hash') or fingerprint(inputs.artifact_identity),str(inputs.k),candidate.execution_fingerprint)
     if kind=='reuse':key+=(inputs.query_hash,)
     return key
 
