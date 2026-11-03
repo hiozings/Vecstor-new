@@ -2,7 +2,7 @@
 
 本文件适用于整个项目，供团队成员与开发代理共同遵循。记录项目实施计划、目录结构、技术栈和开发约束；后续开发应同步维护，避免文档与实际实现脱节。
 
-最后更新：2026-10-23。
+最后更新：2026-11-03。
 
 ## 1. 项目背景与当前状态
 
@@ -123,7 +123,7 @@ P4数据缓存与传输优化子阶段T1—T8已于2026-10-19按代表性实验�
 
 2026-10-23查询统计优化完成：[计划](docs/superpowers/plans/2026-10-23-cache-stats-snapshot.md)、[验收](docs/validation/cache-stats-snapshot.md)。新增锁内常数时间process快照，查询不再扫描缓存，显式分库管理统计仍按需遍历；无PYTHONPATH真实GPU全套841通过。针对既有CPU串行/8及64MiB容量退化完成前后72配置/13440查询、6720对结果与计数一致；64MiB暖态开启缓存P50由63.79降至41.31ms，仍保留关闭缓存控制与波动/退化。新增benchmarks/p4/cache_stats.py独立微基准，不将微基准收益外推全部负载。
 
-P4自适应查询策略下一子阶段已形成[详细设计](docs/design/p4-adaptive-query-strategy.md)和[八任务实施计划](docs/superpowers/plans/2026-10-23-p4-adaptive-query-strategy.md)，尚未实施。建议首期显式CPU path=auto，质量资格优先，结合完整谓词基数、候选相关性、RPC/字节及scope缓存证据作成本决策；不自动改变设备或ANN预算，不新增在线统计扫描。规划包含风险分层、冷启动退化、双节点/重启、完整策略质量及分级性能验收；设计阈值并非已测收益。
+P4自适应查询策略下一子阶段已形成[详细设计](docs/design/p4-adaptive-query-strategy.md)和[八任务实施计划](docs/superpowers/plans/2026-10-23-p4-adaptive-query-strategy.md)，2026-11-03起实施。T1不可变契约及策略解析13项定向测试通过，自动查询入口尚未开放。首期显式CPU path=auto，质量资格优先，结合完整谓词基数、候选相关性、RPC/字节及scope缓存证据作成本决策；不自动改变设备或ANN预算，不新增在线统计扫描。规划包含风险分层、冷启动退化、双节点/重启、完整策略质量及分级性能验收；设计阈值并非已测收益。
 
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
@@ -173,7 +173,7 @@ P4自适应查询策略下一子阶段已形成[详细设计](docs/design/p4-ada
 │   ├── cli.py            # 命令行参数和产物输出
 │   ├── isolation.py      # 计算进程 Landlock 权限与拒绝读取探针
 │   ├── storage/          # service.py兼容P2；catalog/database/sql_service管理库/事务/租约，index_catalog/index_artifacts/index_service管理索引目录、工件与发布RPC
-│   ├── compute/          # P2 RemoteEngine、v2路由/执行、lease_io/index_manager与index_publication/index_recovery显式发布加载及预热
+│   ├── compute/          # P2 RemoteEngine、v2路由/执行、lease_io/index_manager与index_publication/index_recovery显式发布加载及预热；planner_types提供待接入的自适应契约
 │   ├── index/            # CPU工件格式/摘要校验、GPU worker/副本、CPU IVF、快照键、有界registry与构建进程
 │   ├── rpc/              # v1/v2 协议、能力缓存会话客户端、timing接入计时、类型化结果、生命周期和验收
 │   ├── shell/            # app/buffer/commands/index_commands/cache_commands/render/completion：SQL终端与索引/缓存控制

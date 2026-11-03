@@ -8,7 +8,7 @@
 
 **Tech Stack:** 复用Conda Python3.12、NumPy1.26、DuckDB1.5.6、SQLGlot30.21、gRPC1.83、Faiss1.12和pytest；不新增运行时依赖。
 
-**Spec:** [详细设计](../../design/p4-adaptive-query-strategy.md)，尤其第4节语义表、第5节输入来源、第6节风险/成本选择规则和第8—9节验收。**状态：全部任务待实施；本轮未修改业务代码、未运行新实验。** 当前已有基线为快照优化后841项回归；不能把它记作本计划通过。
+**Spec:** [详细设计](../../design/p4-adaptive-query-strategy.md)，尤其第4节语义表、第5节输入来源、第6节风险/成本选择规则和第8—9节验收。**状态：2026-11-03起经用户授权实施，进度见末尾。** 当前已有基线为快照优化后841项回归；不能把它记作本计划通过。
 
 ## Global Constraints
 
@@ -20,7 +20,7 @@
 - 风险门槛建议1%（≥500个独立校准向量的95% Wilson上界）；切换间距max(2ms,参考下界10%)；auto FF临时工作集建议64MiB。均须原样记入配置/报告，后续修改需新策略版本和新留出验证。
 - 超时/取消/DATA_LOSS不能转成成功；规划/反馈计入总deadline；EXPLAIN无扫描、缓存触碰或反馈，ANALYZE/shadow均执行一次。
 - 无PYTHONPATH，完整回归要求真实GPU；性能串行独占运行，数据/参数/查询冻结、至少3重复；未测组标识清楚，不承诺预设提升倍数。
-- 实施前按AGENTS核对Git授权和当前改动；新功能使用codex/分支，精确暂存。当前请求仅授权设计；本计划不授权现在开始实现、合并或推送。
+- 实施前按AGENTS核对Git授权和当前改动；新功能使用codex/分支，精确暂存。2026-11-03用户已授权实施、检查Git、创建功能分支和分阶段提交；不合并或推送。
 
 ## Review Focus
 
@@ -67,11 +67,11 @@ T1定义以下冻结对象（tuple/不可变映射；无存储文件句柄/可�
 
 **Interfaces:** 产出上述冻结类型；`AdaptivePolicy.load(path)->AdaptivePolicy`、`lookup(scope, artifact, metadata_sql, k, context)->PolicyMatch`。PolicyMatch区分cost匹配、基数匹配和profile映射，不能混成一个布尔值；`describe()`提供有限只读元信息。
 
-- [ ] RED：`test_policy_rejects_oversize_nonfinite_negative_and_duplicate`覆盖2MiB/64 workload/64KiB边界、NaN/Inf/负系数及重复ID；`test_cost_context_mismatch_does_not_erase_quality_mapping`验证网络/线程/并发不符仅失效成本；`test_persistent_stats_rebind_epoch_only_after_identity_match`验证epoch变化和revision/工件变化的差别；`test_planner_inputs_are_detached_and_frozen`禁止修改嵌套对象。
-- [ ] 运行`python -m pytest -q tests/unit/test_adaptive_policy.py`，预期因新接口缺失失败，记录失败原因。
-- [ ] 实现解析及有限schema。成本模型固定特征列由schema列举（公共调用、扫描M/N、候选U、各类RPC/B、selector、ANN轮次/探桶、rerank、cache copy/admit），禁止任意表达式执行；保存特征单位、非负系数、训练覆盖、残差和各输入统计来源。部署指纹缺失为unknown。
-- [ ] 重跑该文件，预期全通过；用1份最小合法fixture和所有边界fixture验证，不发布假实测系数。
-- [ ] 提交契约/解析/测试，建议`feat: define versioned adaptive planning policy contracts`。
+- [x] RED：`test_policy_rejects_oversize_nonfinite_negative_and_duplicate`覆盖2MiB/64 workload/64KiB边界、NaN/Inf/负系数及重复ID；`test_cost_context_mismatch_does_not_erase_quality_mapping`验证网络/线程/并发不符仅失效成本；`test_persistent_stats_rebind_epoch_only_after_identity_match`验证epoch变化和revision/工件变化的差别；`test_planner_inputs_are_detached_and_frozen`禁止修改嵌套对象。
+- [x] 运行`python -m pytest -q tests/unit/test_adaptive_policy.py`，预期因新接口缺失失败，记录失败原因。
+- [x] 实现解析及有限schema。成本模型固定特征列由schema列举（公共调用、扫描M/N、候选U、各类RPC/B、selector、ANN轮次/探桶、rerank、cache copy/admit），禁止任意表达式执行；保存特征单位、非负系数、训练覆盖、残差和各输入统计来源。部署指纹缺失为unknown。
+- [x] 重跑该文件，预期全通过；用1份最小合法fixture和所有边界fixture验证，不发布假实测系数。
+- [x] 提交契约/解析/测试，建议`feat: define versioned adaptive planning policy contracts`。
 
 ## Task 2: O(1)scope快照和有界观测
 
@@ -168,3 +168,7 @@ T1定义以下冻结对象（tuple/不可变映射；无存储文件句柄/可�
 - 设计§1—4→T1/T3/T5/T6；§5→T2/T3；§6→T1/T4/T7；§7→T5/T6；A01—A12→T1—T8对应测试；§9→T7/T8。接口类型及策略/历史上限在各任务保持一致。
 - 2026-10-23：已核对最新O(1)快照、执行器、质量解析、租约/存储过滤、客户端确认和历史成本。一次独立设计可实施性审查提出“fallback=error风险优先级”和“部署上下文来源”两个问题，已在设计§5.5/§6及T1/T4/T6落实。
 - 当前未实现任何auto业务入口，未跑本计划测试或校准；设计中的阈值、样本和任务均是待实施约定，不构成已通过的结果。
+
+## 实施记录（2026-11-03）
+
+- T1：不可变契约、策略严格解析与版本/部署匹配完成；13项测试先因缺少模块失败，后全部通过（0.05秒）。本任务不开放auto入口；完整初始回归仍在运行。

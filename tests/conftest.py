@@ -39,3 +39,24 @@ def real_gpu_requirement(request):
     if not gpu_available():
         if os.environ.get('VECSTOR_REQUIRE_GPU')=='1':pytest.fail('GPU acceptance requires a real accessible GPU')
         pytest.skip('No accessible GPU; this does not validate GPU behavior')
+
+
+@pytest.fixture
+def adaptive_document():
+    """Synthetic policy for contract tests, never performance evidence."""
+    return dict(format_version=1, policy_id='test_policy', workloads=[dict(
+        workload_id='items-k10',
+        data_identity=dict(database_id='db', table_id='table', revision=1,
+                           schema_version='schema', dimension=4, metric='squared_l2'),
+        artifact_identity=dict(artifact_id='artifact', payload_sha256='a'*64, build_fingerprint='b'*64),
+        metadata_sql='SELECT id, category, timestamp, value FROM items WHERE value < 10',
+        k=10, table_rows=1000, matched_rows=100,
+        profiles={'filter-first':'filter_profile','search-first':'search_profile'},
+        models=[dict(candidate_id='ann-search', execution_fingerprint='c'*64,
+            hardware_fingerprint='hardware', network_class='loopback', concurrency_bucket=1,
+            coefficients={'intercept':10.,'payload_bytes':0.0001}, residual_ms=2.,
+            statistics=dict(q=[0.1], unique_fractions=[1.], failure_queries=500, failure_count=0,
+                            metadata_bytes_per_row=40., control_bytes=512., selector_bytes_per_row=256.),
+            evidence=dict(fit_queries=96, validation_queries=32, median_relative_error=.1,
+                          p90_relative_error=.2, fit_queries_sha256='d'*64,
+                          validation_queries_sha256='e'*64))])])
