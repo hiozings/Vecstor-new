@@ -16,7 +16,7 @@ def freeze(value):
         return tuple(freeze(item) for item in value)
     if value is None or type(value) in (str, int, float, bool):
         return value
-    if is_dataclass(value) and getattr(value, '__dataclass_params__').frozen:
+    if isinstance(value, (DataScope, SearchOptions, FrozenValues, DeploymentContext)):
         return value
     raise TypeError('Unsupported mutable planning value')
 

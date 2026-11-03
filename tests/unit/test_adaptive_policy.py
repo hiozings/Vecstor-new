@@ -89,3 +89,22 @@ def test_planning_values_reject_mutable_arrays_and_objects():
     for value in (np.zeros(2), object(), {1, 2}):
         with pytest.raises(TypeError, match='planning value'):
             freeze({'nested': value})
+
+
+def test_policy_parameters_are_frozen_and_validated(adaptive_document):
+    adaptive_document['parameters']={'filter_workspace_bytes':12345,'switch_min_ms':3.}
+    policy=AdaptivePolicy.from_document(adaptive_document)
+    assert policy.parameters['filter_workspace_bytes']==12345
+    assert policy.parameters['risk_limit']==.01
+    with pytest.raises(TypeError):policy.parameters['switch_min_ms']=1
+    adaptive_document['parameters']['switch_margin']=float('inf')
+    with pytest.raises(ValueError):AdaptivePolicy.from_document(adaptive_document)
+
+
+def test_arbitrary_frozen_wrapper_cannot_hide_mutable_planning_state():
+    from dataclasses import dataclass
+    from vecstor.compute.planner_types import freeze
+    @dataclass(frozen=True)
+    class Wrapper:
+        mutable: list
+    with pytest.raises(TypeError):freeze(Wrapper([1]))

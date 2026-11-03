@@ -11,6 +11,8 @@ from vecstor.compute.planner_types import FrozenValues, fingerprint, freeze
 from vecstor.query.search_options import validate_profile_id
 
 MAX_BYTES = 2*1024**2
+DEFAULT_PARAMETERS = MappingProxyType(dict(switch_min_ms=2., switch_margin=.1,
+    risk_limit=.01, filter_workspace_bytes=64*1024**2))
 FEATURES = ('intercept', 'scan_rows', 'metadata_rows', 'candidate_rows', 'ann_work',
             'ann_candidates', 'selector_rows', 'rerank_values', 'cache_lookup_rows',
             'cache_copy_bytes', 'cache_admit_bytes', 'rpc_calls', 'payload_bytes')
@@ -100,6 +102,7 @@ class AdaptivePolicy:
         self._document = freeze(document)
         self.policy_id = document['policy_id']
         self.policy_hash = fingerprint(document)
+        self.parameters = freeze(dict(DEFAULT_PARAMETERS, **document.get('parameters',{})))
         self._workloads = MappingProxyType({self._key(w['data_identity'],w['metadata_sql'],w['k']): freeze(w)
                                            for w in document['workloads']})
 
@@ -123,7 +126,13 @@ class AdaptivePolicy:
         except (TypeError, ValueError, RecursionError) as error:
             raise ValueError('Invalid adaptive policy JSON values') from error
         if len(encoded) > MAX_BYTES: raise ValueError('Adaptive policy exceeds 2 MiB')
-        _fields(value, ('format_version','policy_id','workloads'))
+        _fields(value, ('format_version','policy_id','workloads') + (('parameters',) if 'parameters' in value else ()))
+        parameters=value.get('parameters',{})
+        if not isinstance(parameters,dict) or not set(parameters).issubset(DEFAULT_PARAMETERS):
+            raise ValueError('Invalid planner parameters')
+        for key,number in parameters.items():
+            if key=='filter_workspace_bytes':_int(number,1,2**40)
+            else:_number(number,0,1000 if key=='switch_min_ms' else 1)
         if type(value['format_version']) is not int or value['format_version'] != 1:
             raise ValueError('Unsupported adaptive policy version')
         validate_profile_id(value['policy_id'])
@@ -178,4 +187,4 @@ class AdaptivePolicy:
 
     def describe(self):
         return dict(format_version=1,policy_id=self.policy_id,policy_hash=self.policy_hash,
-                    workload_count=len(self._workloads))
+                    workload_count=len(self._workloads),parameters=dict(self.parameters))

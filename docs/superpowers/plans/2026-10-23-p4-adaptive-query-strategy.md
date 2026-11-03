@@ -103,12 +103,12 @@ T1定义以下冻结对象（tuple/不可变映射；无存储文件句柄/可�
 
 **Interfaces:** `estimate_candidate(candidate, inputs, policy)->CandidateEstimate`；`choose_plan(inputs, policy, mode='apply')->PlannerDecision`，mode也支持shadow；无RPC、无数据库、无全局可变状态。候选最多exact/FF/SF三项，轮数≤32。
 
-- [ ] RED：`test_low_selectivity_high_candidate_risk_prefers_filter`和`test_high_selectivity_prefers_search`使用确定性合成系数验证路径交叉；`test_equal_s_opposite_q_changes_choice`；`test_cache_reuse_reduces_miss_bytes_not_filter_rpcs`；`test_partial_misses_do_not_use_global_ceil_as_exact_rpc_count`；`test_rpc_wait_and_nested_faiss_times_are_not_double_counted`。
-- [ ] 补RED：`test_error_fallback_risk_tier_precedes_latency`让10ms高风险SF对30ms低风险FF，必须选FF；all unknown时参考路径且reason明确；`test_explicit_budget_and_small_filtered_exact_branch_are_modelled`；`test_uncertain_interval_uses_reference`；`test_deadline_and_memory_exclusions`；`test_shadow_only_changes_executed_id`。
-- [ ] 运行`python -m pytest -q tests/unit/test_adaptive_planner.py`，观察预期失败。
-- [ ] 实现原候选扩展规则的有界预测，分别计U/M/V/miss/调用布局；fallback=error执行风险分层，fallback=exact计算已花费＋后续exact。以经验区间和差距规则选择；unknown不置零、不凭预测空集合返回答案。超deadline不伪造成功，预测超时不延长实际deadline。
-- [ ] 重跑新测试并加入随机输入不变量检查（非负、有限、显式上限、选择只来自eligible、输入相同决定相同）；预期全通过。
-- [ ] 提交，建议`feat: select CPU query paths with bounded cost and risk models`。
+- [x] RED：`test_low_selectivity_high_candidate_risk_prefers_filter`和`test_high_selectivity_prefers_search`使用确定性合成系数验证路径交叉；`test_equal_s_opposite_q_changes_choice`；`test_cache_reuse_reduces_miss_bytes_not_filter_rpcs`；`test_partial_misses_do_not_use_global_ceil_as_exact_rpc_count`；`test_rpc_wait_and_nested_faiss_times_are_not_double_counted`。
+- [x] 补RED：`test_error_fallback_risk_tier_precedes_latency`让10ms高风险SF对30ms低风险FF，必须选FF；all unknown时参考路径且reason明确；`test_explicit_budget_and_small_filtered_exact_branch_are_modelled`；`test_uncertain_interval_uses_reference`；`test_deadline_and_memory_exclusions`；`test_shadow_only_changes_executed_id`。
+- [x] 运行`python -m pytest -q tests/unit/test_adaptive_planner.py`，观察预期失败。
+- [x] 实现原候选扩展规则的有界预测，分别计U/M/V/miss/调用布局；fallback=error执行风险分层，fallback=exact计算已花费＋后续exact。以经验区间和差距规则选择；unknown不置零、不凭预测空集合返回答案。超deadline不伪造成功，预测超时不延长实际deadline。
+- [x] 重跑新测试并加入随机输入不变量检查（非负、有限、显式上限、选择只来自eligible、输入相同决定相同）；预期全通过。
+- [x] 提交，建议`feat: select CPU query paths with bounded cost and risk models`。
 
 ## Task 5: 执行器接入、实际计划和一次执行
 
@@ -176,3 +176,5 @@ T1定义以下冻结对象（tuple/不可变映射；无存储文件句柄/可�
 - 初始真实GPU全套基线841通过（544.58秒、零跳过、无PYTHONPATH）。T2新增scope快照/丢失序号和256条有界观测；四项scope测试先失败，观测/缓存/T1合计65项通过（0.36秒）。同时补齐T1可变数组拒绝测试，先失败后修复。
 
 - T3：同租约候选资格、逐路径质量解析、基数来源及缓存/风险观测输入完成；31项规划/既有质量测试通过（0.43秒）。补充缺失索引且显式fused时仍保留既有exact回退，失败复现后修复；此为不可执行ANN的结构性回退，不是成本驱动主动exact。
+
+- T4：候选轮次、RPC/字节、缓存及回退成本模型与风险分层完成；47项规划相关测试通过（0.48秒）。回退估计追加实际扫描/向量量但不重复BeginRead/EndRead。策略JSON可选parameters冻结切换差距、风险及内存预算；默认仍为设计值。规划契约另补任意冻结包装隐藏可变状态的失败测试并修复。
