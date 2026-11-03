@@ -94,7 +94,7 @@ class VersionedVectorCache:
         self.config=config
         self._lock=RLock()
         self._entries=OrderedDict();self._scopes={}
-        self._bytes=0;self._payload_bytes=0;self._generation=0
+        self._bytes=0;self._payload_bytes=0;self._generation=0;self._loss_generation=0
         self._active=0;self._workspace_peak=0;self._closed=False
 
     @contextmanager
@@ -124,6 +124,7 @@ class VersionedVectorCache:
 
     def _drop(self, key):
         raw=self._entries.pop(key);scope=key[0]
+        self._loss_generation+=1
         self._bytes-=ENTRY_CHARGE+len(raw);self._payload_bytes-=len(raw)
         self._scopes[scope]-=1
         if not self._scopes[scope]:
@@ -171,6 +172,17 @@ class VersionedVectorCache:
         with self._lock:
             return self._process_snapshot_locked()
 
+    def scope_snapshot(self, scope):
+        """Read bounded counters without walking entries or changing LRU order."""
+        if not isinstance(scope,DataScope):raise ValueError('Invalid data scope')
+        with self._lock:
+            result=self._process_snapshot_locked()
+            count=self._scopes.get(scope,0)
+            result.update(scope_entry_count=count,scope_payload_bytes=count*scope.dimension*4,
+                loss_generation=self._loss_generation,workspace_slots=self.config.workspace_slots,
+                active_workspaces=self._active,closed=self._closed)
+            return result
+
     def stats(self, database_id):
         with self._lock:
             rows=[(scope,len(raw)) for (scope,_),raw in self._entries.items() if scope.database_id==database_id]
@@ -181,13 +193,13 @@ class VersionedVectorCache:
 
     def clear(self, database_id):
         with self._lock:
-            self._generation+=1
+            self._generation+=1;self._loss_generation+=1
             keys=[key for key in self._entries if key[0].database_id==database_id]
             for key in keys:self._drop(key)
             return dict(data_cache_version=1,database_id=database_id,removed=len(keys),admission_generation=self._generation)
 
     def close(self):
         with self._lock:
-            self._closed=True;self._generation+=1
+            self._closed=True;self._generation+=1;self._loss_generation+=1
             self._entries.clear();self._scopes.clear()
             self._bytes=0;self._payload_bytes=0

@@ -79,11 +79,11 @@ T1定义以下冻结对象（tuple/不可变映射；无存储文件句柄/可�
 
 **Interfaces:** `VersionedVectorCache.scope_snapshot(scope)`返回scope条数/payload及process预算、活动工作区、admission_generation、loss_generation；不暴露内部dict。`ObservationStore(max_entries=256, entry_charge=8192, ttl_seconds=300)`及前述get/peek/record/note_budget_failure。`make_reuse_observation(inputs, trace, before, after)`返回标量证据或None，不保存ID/向量/结果。
 
-- [ ] RED：`test_scope_snapshot_without_entry_or_scope_iteration`用禁止遍历容器覆盖空/其他库/65535条；`test_loss_generation_tracks_evict_clear_close_not_hits`验证序号；`test_reuse_requires_same_query_budget_path_and_generations`覆盖clear在完成前后、淘汰、scan admission off、bypass和fused未匹配lookup；`test_history_bounds_ttl_peek_and_concurrent_eviction`覆盖257项、TTL=300边界、EXPLAIN peek无副作用及并发。
-- [ ] 运行新测试及快照测试，预期新接口失败；保留上一阶段process_snapshot已有测试。
-- [ ] 实现只用已有_scopes计数推导scope payload，loss序号在同锁更新。观测固定有界字段、查询摘要由已验证float32规范字节计算；record只处理一个键，满时一条LRU淘汰；get仅懒删除当前过期键。复用证据核验实际重排向量、准入/重复插入/服务数，不用全局hit差值。
-- [ ] 运行`python -m pytest -q tests/unit/test_planner_observations.py tests/unit/test_cache_process_snapshot.py tests/unit/test_vector_data_cache.py tests/unit/test_data_cache_concurrency.py`，预期全通过，原process统计字段不变。
-- [ ] 提交，建议`feat: add bounded version-scoped planner observations`。
+- [x] RED：`test_scope_snapshot_without_entry_or_scope_iteration`用禁止遍历容器覆盖空/其他库/65535条；`test_loss_generation_tracks_evict_clear_close_not_hits`验证序号；`test_reuse_requires_same_query_budget_path_and_generations`覆盖clear在完成前后、淘汰、scan admission off、bypass和fused未匹配lookup；`test_history_bounds_ttl_peek_and_concurrent_eviction`覆盖257项、TTL=300边界、EXPLAIN peek无副作用及并发。
+- [x] 运行新测试及快照测试，预期新接口失败；保留上一阶段process_snapshot已有测试。
+- [x] 实现只用已有_scopes计数推导scope payload，loss序号在同锁更新。观测固定有界字段、查询摘要由已验证float32规范字节计算；record只处理一个键，满时一条LRU淘汰；get仅懒删除当前过期键。复用证据核验实际重排向量、准入/重复插入/服务数，不用全局hit差值。
+- [x] 运行`python -m pytest -q tests/unit/test_planner_observations.py tests/unit/test_cache_process_snapshot.py tests/unit/test_vector_data_cache.py tests/unit/test_data_cache_concurrency.py`，预期全通过，原process统计字段不变。
+- [x] 提交，建议`feat: add bounded version-scoped planner observations`。
 
 ## Task 3: 候选资格和同租约输入解析
 
@@ -172,3 +172,5 @@ T1定义以下冻结对象（tuple/不可变映射；无存储文件句柄/可�
 ## 实施记录（2026-11-03）
 
 - T1：不可变契约、策略严格解析与版本/部署匹配完成；13项测试先因缺少模块失败，后全部通过（0.05秒）。本任务不开放auto入口；完整初始回归仍在运行。
+
+- 初始真实GPU全套基线841通过（544.58秒、零跳过、无PYTHONPATH）。T2新增scope快照/丢失序号和256条有界观测；四项scope测试先失败，观测/缓存/T1合计65项通过（0.36秒）。同时补齐T1可变数组拒绝测试，先失败后修复。

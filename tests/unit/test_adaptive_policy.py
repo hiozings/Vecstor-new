@@ -81,3 +81,11 @@ def test_planner_inputs_are_detached_and_frozen(adaptive_document):
     with pytest.raises(TypeError): inputs.statistics['cardinality']['value'] = 1
     with pytest.raises(FrozenInstanceError): inputs.k = 2
     assert inputs.statistics['samples'] == (1, 2)
+
+
+def test_planning_values_reject_mutable_arrays_and_objects():
+    import numpy as np
+    from vecstor.compute.planner_types import freeze
+    for value in (np.zeros(2), object(), {1, 2}):
+        with pytest.raises(TypeError, match='planning value'):
+            freeze({'nested': value})

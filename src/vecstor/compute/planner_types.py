@@ -14,7 +14,11 @@ def freeze(value):
         return MappingProxyType({key: freeze(item) for key, item in value.items()})
     if isinstance(value, (list, tuple)):
         return tuple(freeze(item) for item in value)
-    return value
+    if value is None or type(value) in (str, int, float, bool):
+        return value
+    if is_dataclass(value) and getattr(value, '__dataclass_params__').frozen:
+        return value
+    raise TypeError('Unsupported mutable planning value')
 
 
 def plain(value):
