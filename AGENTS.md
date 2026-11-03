@@ -123,6 +123,8 @@ P4数据缓存与传输优化子阶段T1—T8已于2026-10-19按代表性实验�
 
 2026-10-23查询统计优化完成：[计划](docs/superpowers/plans/2026-10-23-cache-stats-snapshot.md)、[验收](docs/validation/cache-stats-snapshot.md)。新增锁内常数时间process快照，查询不再扫描缓存，显式分库管理统计仍按需遍历；无PYTHONPATH真实GPU全套841通过。针对既有CPU串行/8及64MiB容量退化完成前后72配置/13440查询、6720对结果与计数一致；64MiB暖态开启缓存P50由63.79降至41.31ms，仍保留关闭缓存控制与波动/退化。新增benchmarks/p4/cache_stats.py独立微基准，不将微基准收益外推全部负载。
 
+P4自适应查询策略下一子阶段已形成[详细设计](docs/design/p4-adaptive-query-strategy.md)和[八任务实施计划](docs/superpowers/plans/2026-10-23-p4-adaptive-query-strategy.md)，尚未实施。建议首期显式CPU path=auto，质量资格优先，结合完整谓词基数、候选相关性、RPC/字节及scope缓存证据作成本决策；不自动改变设备或ANN预算，不新增在线统计扫描。规划包含风险分层、冷启动退化、双节点/重启、完整策略质量及分级性能验收；设计阈值并非已测收益。
+
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
 ### 团队协作
@@ -209,6 +211,7 @@ P4数据缓存与传输优化子阶段T1—T8已于2026-10-19按代表性实验�
 │   ├── design/interactive-sql-shell.md # P2.5 终端与可写数据库设计
 │   ├── design/p3-faiss-execution.md # P3 索引、两路径与计划展示设计
 │   ├── design/p4-data-cache-and-transfer.md # 有界向量缓存/字段传输设计与验收边界
+│   ├── design/p4-adaptive-query-strategy.md # CPU自适应路径、统计/成本/质量约束设计（待实施）
 │   ├── design/p4-index-publication.md # P4索引工件/发布/双节点/恢复设计与实施边界（索引子阶段完成）
 │   ├── design/gpu-improvement-analysis.md # GPU不足、补充探测与改进优先级
 │   ├── design/gpu-ann-execution.md # GPU ANN 与 SQL 设备选择设计
@@ -228,6 +231,7 @@ P4数据缓存与传输优化子阶段T1—T8已于2026-10-19按代表性实验�
 │   ├── superpowers/plans/2026-10-12-interactive-sql-shell.md # P2.5 执行计划与完成记录
 │   ├── superpowers/plans/2026-10-13-p3-faiss.md # P3 六任务实施计划
 │   ├── superpowers/plans/2026-10-15-gpu-improvements.md # GPU G0—G2实施记录与G3—G5待办
+│   ├── superpowers/plans/2026-10-23-p4-adaptive-query-strategy.md # 自适应策略八任务计划（待实施）
 │   ├── superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md # 缓存与传输八任务实施记录（代表性范围完成）
 │   ├── superpowers/plans/2026-10-16-p4-index-publication.md # P4索引子阶段九任务计划与验收矩阵（已完成）
 │   ├── superpowers/plans/2026-10-15-gpu-ann.md # GPU 六阶段实施记录
