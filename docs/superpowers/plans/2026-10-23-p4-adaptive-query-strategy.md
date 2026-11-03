@@ -91,11 +91,11 @@ T1定义以下冻结对象（tuple/不可变映射；无存储文件句柄/可�
 
 **Interfaces:** `QualityCatalog.describe_profile(profile_id)->Mapping|None`为公开O(1)单项访问；`qualify_candidates(plan, options, lease, pinned_cpu_entry, quality_catalog, policy_match)->tuple[PlanCandidate,...]`；`collect_planning_inputs(..., cache_snapshot, observation_store, deployment_context, remaining_ms)->PlanningInputs`。只接收已经打开的lease和已持引用entry，不自己调用RPC/registry.acquire。
 
-- [ ] RED：`test_exact_auto_never_qualifies_ann`；`test_error_fallback_and_fused_prune_exact`；`test_each_path_resolves_its_own_profile`；`test_explicit_profile_budget_conflict_is_not_cost_fallback`；`test_optional_profile_conflict_excludes_only_that_candidate`（全冲突INVALID_ARGUMENT）；`test_unknown_cardinality_does_not_scan_or_count`；`test_sf_matches_do_not_become_table_cardinality`；`test_corrupt_artifact_is_not_optimizer_downgrade`。
-- [ ] 运行`python -m pytest -q tests/unit/test_planning_inputs.py`，预期缺少接口失败。
-- [ ] 实现第4—5节资格与统计优先级。先构造具体path options再调用现有resolve；显式quality只映射其一条路径；不把policy profile映射直接当已校验证据。统计有效性与成本有效性分开；N缺失时不猜测。未知/冲突统计保守退化，但执行实际过滤不受影响。
-- [ ] 运行新文件及`tests/unit/test_quality_policy.py tests/unit/test_artifact_quality_policy.py`，预期全通过；用stub断言没有新增网络或跨层内部文件读取。
-- [ ] 提交，建议`feat: qualify adaptive candidates against leases and quality profiles`。
+- [x] RED：`test_exact_auto_never_qualifies_ann`；`test_error_fallback_and_fused_prune_exact`；`test_each_path_resolves_its_own_profile`；`test_explicit_profile_budget_conflict_is_not_cost_fallback`；`test_optional_profile_conflict_excludes_only_that_candidate`（全冲突INVALID_ARGUMENT）；`test_unknown_cardinality_does_not_scan_or_count`；`test_sf_matches_do_not_become_table_cardinality`；`test_corrupt_artifact_is_not_optimizer_downgrade`。
+- [x] 运行`python -m pytest -q tests/unit/test_planning_inputs.py`，预期缺少接口失败。
+- [x] 实现第4—5节资格与统计优先级。先构造具体path options再调用现有resolve；显式quality只映射其一条路径；不把policy profile映射直接当已校验证据。统计有效性与成本有效性分开；N缺失时不猜测。未知/冲突统计保守退化，但执行实际过滤不受影响。
+- [x] 运行新文件及`tests/unit/test_quality_policy.py tests/unit/test_artifact_quality_policy.py`，预期全通过；用stub断言没有新增网络或跨层内部文件读取。
+- [x] 提交，建议`feat: qualify adaptive candidates against leases and quality profiles`。
 
 ## Task 4: 纯成本估算、风险分层与确定性决策
 
@@ -174,3 +174,5 @@ T1定义以下冻结对象（tuple/不可变映射；无存储文件句柄/可�
 - T1：不可变契约、策略严格解析与版本/部署匹配完成；13项测试先因缺少模块失败，后全部通过（0.05秒）。本任务不开放auto入口；完整初始回归仍在运行。
 
 - 初始真实GPU全套基线841通过（544.58秒、零跳过、无PYTHONPATH）。T2新增scope快照/丢失序号和256条有界观测；四项scope测试先失败，观测/缓存/T1合计65项通过（0.36秒）。同时补齐T1可变数组拒绝测试，先失败后修复。
+
+- T3：同租约候选资格、逐路径质量解析、基数来源及缓存/风险观测输入完成；31项规划/既有质量测试通过（0.43秒）。补充缺失索引且显式fused时仍保留既有exact回退，失败复现后修复；此为不可执行ANN的结构性回退，不是成本驱动主动exact。

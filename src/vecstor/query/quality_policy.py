@@ -120,6 +120,11 @@ class QualityCatalog:
         if len({p.profile_id for p in profiles})!=len(profiles):raise ValueError('Duplicate quality profile IDs')
         return cls(profiles)
 
+    def describe_profile(self, profile_id):
+        """Describe one profile without scanning the catalog or granting eligibility."""
+        profile=self._profiles.get(profile_id)
+        return profile.describe() if profile is not None else None
+
     def list(self):return [p.describe() for p in self._profiles.values()]
 
     def resolve(self,profile_id,key,nlist,row_count,plan,options,execution=None,artifact=None,index_source='local'):
