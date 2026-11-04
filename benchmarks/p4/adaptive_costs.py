@@ -114,3 +114,41 @@ def source_manifest(root):
     paths=[*root.joinpath('src').rglob('*.py'),*root.joinpath('benchmarks/p4').glob('*.py'),
            root/'tests/support/delayed_storage.py']
     return {str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(paths)}
+
+
+def assess_performance(runs, case_ids, *, quality_certified):
+    """Publication gates require complete comparable evidence, never just fast results."""
+    guards=[]
+    for case_id in case_ids:
+        for phase in ('cold','warm'):
+            groups={}
+            for run in runs:
+                if run['case']==case_id:
+                    found=next((p for p in run['phases'] if p['name']==phase),None)
+                    if found is not None:groups.setdefault(run['variant'],[]).append(found)
+            fixed={name:rows for name,rows in groups.items() if name in ('filter-first','search-first')}
+            auto=groups.get('auto',[])
+            populations=[auto,*fixed.values()]
+            enough=bool(fixed and all(len(rows)>=3 and all(p['requests']>=200 and p['p95_ms'] is not None for p in rows)
+                                     for rows in populations))
+            row=dict(case=case_id,phase=phase,status='insufficient_evidence',passed=False,
+                     selection_rate=None,model_coverage=None)
+            if not enough:guards.append(row);continue
+            med50={name:float(np.median([p['p50_ms'] for p in rows])) for name,rows in fixed.items()}
+            best=min(med50,key=med50.get);best50=med50[best]
+            best95=min(float(np.median([p['p95_ms'] for p in rows])) for rows in fixed.values())
+            auto50=float(np.median([p['p50_ms'] for p in auto]));auto95=float(np.median([p['p95_ms'] for p in auto]))
+            requests=sum(p['requests'] for p in auto)
+            coverage=min(sum(p.get('model_coverage',{}).get('ann-filter' if name=='filter-first' else 'ann-search',0)
+                             for p in auto)/requests for name in fixed)
+            gap=max(med50.values())/best50-1 if best50>0 else 0.
+            selection=sum(p['decisions'].get(best,0) for p in auto)/requests
+            overhead=max(p['planner_feedback_p95_ms'] for p in auto)
+            row.update(status='evaluated' if coverage>=.95 else 'insufficient_model_coverage',best_fixed=best,
+                p50_ratio=auto50/best50,p95_ratio=auto95/best95,model_coverage=coverage,
+                fixed_gap_fraction=gap,selection_rate=selection,selection_gate_required=len(fixed)>1 and gap>=.2,
+                planner_feedback_p95_ms=overhead)
+            row['passed']=bool(coverage>=.95 and row['p50_ratio']<=1.1 and row['p95_ratio']<=1.2 and
+                overhead<=min(.5,auto50*.02) and (not row['selection_gate_required'] or selection>=.9))
+            guards.append(row)
+    return guards,bool(quality_certified and len(guards)==len(case_ids)*2 and all(g['passed'] for g in guards))

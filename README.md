@@ -23,7 +23,7 @@ conda create -n vecstor --file environments/vecstor-linux-64.explicit.txt
 
 依赖声明见 `environment.yml`。环境包含 Python、DuckDB、SQLGlot、Faiss CPU/GPU、gRPC/Protobuf 和 pytest。默认检查需要可用的 NVIDIA GPU 和本地 TCP 监听权限；沙箱受限时在沙箱外执行。仅验证 CPU 时可显式使用 `--cpu-only`。
 
-环境检查已通过，P1 本地基线、P2 gRPC 存算分离和 P2.5 交互式 SQL/持久 CRUD 已实现。P3 已接入 CPU Faiss IVFFlat、两条近似路径、候选扩展和执行计划，默认仍为 NumPy float64 精确查询。GPU 已新增显式 ANN 先检索路径，CPU 训练与 float64 重排保留；持久索引分发与自适应策略留待后续阶段。详细版本见 [环境说明](docs/environment.md)，项目计划见 [AGENTS.md](AGENTS.md)。
+环境检查已通过，P1 本地基线、P2 gRPC 存算分离和 P2.5 交互式 SQL/持久 CRUD 已实现。P3 已接入 CPU Faiss IVFFlat、两条近似路径、候选扩展和执行计划，默认仍为 NumPy float64 精确查询。GPU 支持显式 ANN 先检索路径，CPU 训练与 float64 重排保留；P4持久索引分发与有界缓存子阶段已完成，CPU自适应策略已接入、正式验收进行中。详细版本见 [环境说明](docs/environment.md)，项目计划见 [AGENTS.md](AGENTS.md)。
 
 ## 交互式 SQL 终端
 
@@ -144,4 +144,10 @@ G0—G2已补强GPU候选完整性和响应校验，减少热会话能力查询�
 
 可通过`--data-cache-mib 64`启用计算侧有界原始向量缓存，`--metadata-projection projected`仅回传需要的元数据；缓存、字段投影和既有fused路径独立开关。请求级使用`SETTINGS data_cache='on', metadata_projection='projected'`，终端用`.cache stats`查看、`.cache clear`清理所选库的数据缓存。默认缓存关闭；exact扫描默认只查不填，允许扫描预热需显式`--data-cache-scan-admission on`。
 
-操作及资源/版本边界见[缓存说明](docs/p4-cache.md)，实际回归与代表性实验范围见[缓存验收](docs/validation/p4-cache.md)。审查修复后的完整真实GPU回归838项通过；代表性38场景、CPU/GPU共630次配置和33744条计时查询通过。缓存显著减少部分暖态传输，但也有CPU延迟退化，详见验收记录；完整200查询矩阵未运行，自适应策略和增量维护仍待推进。
+操作及资源/版本边界见[缓存说明](docs/p4-cache.md)，实际回归与代表性实验范围见[缓存验收](docs/validation/p4-cache.md)。审查修复后的完整真实GPU回归838项通过；代表性38场景、CPU/GPU共630次配置和33744条计时查询通过。缓存显著减少部分暖态传输，但也有CPU延迟退化，详见验收记录；完整200查询矩阵未运行。后续每查询统计已改为常数时间快照，见[统计优化验收](docs/validation/cache-stats-snapshot.md)。
+
+## P4 自适应查询策略（验收中）
+
+计算服务使用`--adaptive-policy <policy.json>`加载与实际数据、工件及部署绑定的策略；请求以`.search path auto`或`SETTINGS path='auto'`显式启用CPU路径选择。近似auto要求published索引和有效质量证据，默认查询仍保持exact。`--adaptive-mode shadow`仅报告建议并执行参考路径，适合观察决策。
+
+资格校验优先于成本选择，候选预算和设备不会被自动降低或切换。过滤比例、候选相关性、RPC/传输量及本地缓存证据参与估算；缺失或不匹配证据时保守退化。使用、校准和限制见[自适应说明](docs/p4-adaptive.md)，实际通过范围见[验收记录](docs/validation/p4-adaptive.md)。功能接入不等于性能发布验收通过，增量维护仍未实现。

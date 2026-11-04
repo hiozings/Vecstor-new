@@ -160,3 +160,9 @@ def read_configuration(spec,query):
     config=CacheConfig(max_bytes=spec['capacity_mib']*1024**2)
     plan=classify_statement(sql_for(spec,query)).vector
     return effective_read_settings(plan,SimpleNamespace(config=config),True,'projected',False)
+
+
+def fit_training_wire_layout(records, dimension, stats, validation_indices):
+    """Freeze byte-model preprocessing before consulting validation outcomes."""
+    validation=set(validation_indices)
+    return fit_wire_layout([row for row in records if row['query_id'] not in validation],dimension,stats)

@@ -13,15 +13,16 @@ import runpy
 import shutil
 import sys
 import time
+from threading import Event, Lock
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import numpy as np
 from adaptive_cases import matrix_cases
 from adaptive_costs import (make_query_splits,query_digest,digest_list,quality_summary,fit_cost_model,
-                           latency_summary,source_manifest,validate_resume)
+                           latency_summary,source_manifest,validate_resume,assess_performance)
 from adaptive_evidence import (write_json,sql_for,workload_name,dataset_digest,Oracle,settings_for,
-                               make_quality_profile,round_statistics,fit_wire_layout,forecast_record,read_configuration)
+                               make_quality_profile,round_statistics,fit_training_wire_layout,forecast_record,read_configuration)
 from vecstor.datasets import generate_dataset,save_dataset,load_dataset
 from vecstor.index.artifact import SnapshotHasher
 from vecstor.compute.planning_inputs import execution_signature
@@ -208,7 +209,7 @@ def cost_samples(group,spec,pools,quality_file,profile,mode,path,fallback,direct
     if profile:
         stats_records=[json.loads(line) for line in Path(profile['_calibration_file']).read_text().splitlines()]
     stats=round_statistics(stats_records)
-    stats=fit_wire_layout(records,spec['dimension'],stats)
+    stats=fit_training_wire_layout(records,spec['dimension'],stats,validation_indices)
     transformed=[forecast_record(spec,group.descriptor,options,stats,r,read) for r in records]
     training=[r for r,raw in zip(transformed,records) if raw['query_id'] not in validation_indices]
     validation=[r for r,raw in zip(transformed,records) if raw['query_id'] in validation_indices]
@@ -316,7 +317,10 @@ def phase_summary(name,records,elapsed):
         vectors_fetched=sum(r['plan']['counts']['vectors_fetched'] for r in records),
         planner_feedback_p95_ms=float(np.percentile([r['plan'].get('adaptive',{}).get('planner_ms',0.)+
             r['plan'].get('adaptive',{}).get('feedback_ms',0.) for r in records],95)),
-        decisions={path:sum(r['plan']['actual_path']==path for r in records) for path in ('filter-first','search-first')})
+        decisions={path:sum(r['plan']['actual_path']==path for r in records) for path in ('filter-first','search-first')},
+        model_coverage={cid:sum(any(e['candidate_id']==cid and e['eligible'] and e['mean_ms'] is not None
+                                   for e in r['plan'].get('adaptive',{}).get('estimates',[])) for r in records)
+                        for cid in ('ann-filter','ann-search')})
     return summary
 
 
@@ -338,17 +342,29 @@ def _trial(group,spec,queries,variant,options,policy_file,quality_file,repeat,ou
     output.mkdir(parents=True,exist_ok=True)
     if (output/'complete.json').exists():
         complete=json.loads((output/'complete.json').read_text())
+        if complete.get('state')=='failed':raise ValueError('Previously failed trial cannot be promoted by resume')
+        if complete.get('state')!='complete':raise ValueError('Trial completion state is unknown')
         if hashlib.sha256((output/'report.json').read_bytes()).hexdigest()!=complete['report_sha256']:
             raise ValueError('Completed trial summary changed')
         report=json.loads((output/'report.json').read_text());raw=output/'cases.jsonl'
         if hashlib.sha256(raw.read_bytes()).hexdigest()!=report['raw_sha256']:raise ValueError('Completed trial evidence changed')
         report['reused']=True
         return report,[json.loads(line) for line in raw.read_text().splitlines()]
+    if (output/'attempts.jsonl').exists() and (output/'attempts.jsonl').stat().st_size:
+        raise ValueError('Interrupted trial has recorded attempts; retain it as failed evidence and start a new experiment')
     if (output/'cases.jsonl').exists():
         (output/'cases.jsonl').rename(output/f'cases.incomplete-{time.time_ns()}.jsonl')
     process=None;monitor=Monitor(group.root/'indexes',False);monitor.observe('storage',group.storage.process.pid)
-    report=dict(variant=variant,repeat=repeat,phases=[],equivalent=True,reused=False)
-    records=[];proxy=None
+    report=dict(variant=variant,repeat=repeat,phases=[],equivalent=None,reused=False,
+                timing_scope='query latency excludes journal; throughput includes journal, validation follows timing')
+    records=[];received=[];proxy=None;failure=None
+    lock=Lock();stop=Event();journal=(output/'attempts.jsonl').open('w');journal_seconds=0.
+    def event(value):
+        nonlocal journal_seconds
+        with lock:
+            started=time.perf_counter()
+            journal.write(json.dumps(value,allow_nan=False)+'\n');journal.flush()
+            journal_seconds+=time.perf_counter()-started
     try:
         address=group.storage.address;network='loopback'
         if spec.get('delay_ms') is not None:
@@ -380,10 +396,23 @@ def _trial(group,spec,queries,variant,options,policy_file,quality_file,repeat,ou
                 def query_worker(worker_id):
                     own=[]
                     for i in range(worker_id,len(phase_queries),len(clients)):
+                        if stop.is_set():break
                         query=phase_queries[i]
-                        start=time.perf_counter();result=clients[worker_id].execute(sql_for(spec,query));ms=(time.perf_counter()-start)*1000
-                        own.append(dict(query_id=i,query_digest=query_digest(query),query=query.tolist(),ms=ms,
-                            rows=result['rows'],revision=result['revision'],plan=result['execution_plan'],phase=phase))
+                        identity=dict(query_id=i,query_digest=query_digest(query),phase=phase)
+                        event(dict(event='started',**identity))
+                        start=time.perf_counter()
+                        try:result=clients[worker_id].execute(sql_for(spec,query))
+                        except BaseException as error:
+                            stop.set()
+                            record=dict(**identity,ms=(time.perf_counter()-start)*1000,error=str(error),
+                                        complete=False,actual_mode='error')
+                            with lock:received.append(record)
+                            event(dict(event='error',**record));raise
+                        record=dict(**identity,query=query.tolist(),ms=(time.perf_counter()-start)*1000,
+                            rows=result['rows'],revision=result['revision'],plan=result['execution_plan'],
+                            complete=False,actual_mode='received_unvalidated')
+                        with lock:received.append(record)
+                        event(dict(event='received',**record));own.append(record)
                     return own
                 if len(clients)==1:samples=query_worker(0)
                 else:
@@ -392,19 +421,31 @@ def _trial(group,spec,queries,variant,options,policy_file,quality_file,repeat,ou
                 elapsed=time.perf_counter()-began
                 # All answer/oracle work is outside the timed throughput interval.
                 for record,query in zip(samples,phase_queries):
-                    record.update(group.oracle.validate(spec,query,dict(rows=record['rows'],revision=record['revision'],
-                                                                       execution_plan=record['plan']),group.descriptor))
+                    try:
+                        record.update(group.oracle.validate(spec,query,dict(rows=record['rows'],revision=record['revision'],
+                                                                           execution_plan=record['plan']),group.descriptor))
+                    except BaseException as error:
+                        record.update(error=str(error),complete=False)
+                        event(dict(event='validation_error',query_id=record['query_id'],phase=phase,error=str(error)))
+                        raise
+                    event(dict(event='validated',query_id=record['query_id'],phase=phase,recall=record['recall']))
                 report['phases'].append(phase_summary(phase,samples,elapsed));records+=samples
             report['cache_end']=client.data_cache_stats()
+    except BaseException as error:
+        failure=error;report['error']=str(error)
     finally:
+        journal.close()
         report['resources']=monitor.close()
         if proxy:proxy.close()
     raw=output/'cases.jsonl'
     with raw.open('x') as sink:
-        for record in records:sink.write(json.dumps(record,allow_nan=False)+'\n')
+        for record in received:sink.write(json.dumps(record,allow_nan=False)+'\n')
+    report.update(functional_passed=failure is None,attempted_queries=len(received),journal_seconds=journal_seconds)
     report['raw_sha256']=hashlib.sha256(raw.read_bytes()).hexdigest()
     write_json(output/'report.json',report)
-    write_json(output/'complete.json',dict(report_sha256=hashlib.sha256((output/'report.json').read_bytes()).hexdigest()))
+    write_json(output/'complete.json',dict(state='complete' if failure is None else 'failed',
+                                          report_sha256=hashlib.sha256((output/'report.json').read_bytes()).hexdigest()))
+    if failure is not None:raise failure
     return report,records
 
 
@@ -497,30 +538,19 @@ def evaluate(calibration_dir,output_dir,*,tier='representative',case_ids=None,re
                             if record['rows']!=fixed[key]:raise AssertionError('Auto answer differs from selected fixed path')
                     if quality_records:
                         report['quality'].append(dict(case=case_id,phases={phase:quality_summary([r for r in quality_records if r['phase']==phase]) for phase in ('cold','warm')}))
+                    for trial in report['runs']:
+                        if trial['case']==case_id:trial['equivalent']=True
                     write_json(output/'report.json',report)
             finally:group.close()
         report['functional_passed']=bool(report['runs'])
         report['quality_certified']=not smoke and len(report['quality'])==len(selected) and all(
             phase['eligible'] for row in report['quality'] for phase in row['phases'].values())
-        guards=[]
-        if not smoke:
-            for case_id,spec in selected:
-                for phase in ('cold','warm'):
-                    groups={}
-                    for run in report['runs']:
-                        if run['case']==case_id:
-                            groups.setdefault(run['variant'],[]).append(next(p for p in run['phases'] if p['name']==phase))
-                    if 'auto' not in groups:continue
-                    fixed=[v for k,v in groups.items() if k in ('filter-first','search-first')]
-                    if not fixed:continue
-                    best50=min(float(np.median([p['p50_ms'] for p in rows])) for rows in fixed)
-                    best95=min(float(np.median([p['p95_ms'] for p in rows])) for rows in fixed)
-                    auto50=float(np.median([p['p50_ms'] for p in groups['auto']]))
-                    auto95=float(np.median([p['p95_ms'] for p in groups['auto']]))
-                    overhead=max(p['planner_feedback_p95_ms'] for p in groups['auto'])
-                    guards.append(dict(case=case_id,phase=phase,p50_ratio=auto50/best50,p95_ratio=auto95/best95,
-                        planner_feedback_p95_ms=overhead,passed=auto50<=best50*1.1 and auto95<=best95*1.2 and overhead<=min(.5,auto50*.02)))
-            report['guards']=guards;report['performance_passed']=report['quality_certified'] and len(guards)==len(selected)*2 and all(g['passed'] for g in guards)
+        if not smoke and tier!='correctness':
+            report['guards'],report['performance_passed']=assess_performance(report['runs'],[i for i,_ in selected],
+                                                                             quality_certified=report['quality_certified'])
+        else:
+            report['performance_status']='NOT_RUN'
+            report['performance_passed']=None
     except Exception as error:report['error']=str(error);raise
     finally:
         report['elapsed_seconds']=time.monotonic()-started

@@ -61,3 +61,44 @@ def test_unsupported_quality_cell_is_not_exact_success():
     h=helpers()
     evidence=h['quality_summary']([dict(query_digest='a',recall=1.,actual_mode='exact',complete=True)])
     assert not evidence['eligible'] and evidence['exact_queries']==1
+
+
+def test_selection_accuracy_is_a_required_performance_gate():
+    assess=helpers()['assess_performance']
+    runs=[]
+    for repeat in (1,2,3):
+        for variant,latency in [('filter-first',100.),('search-first',50.),('auto',50.)]:
+            phases=[dict(name=p,requests=200,p50_ms=latency,p95_ms=latency*1.2,
+                         planner_feedback_p95_ms=.1,decisions={'filter-first':200,'search-first':0},
+                         model_coverage={'ann-filter':200,'ann-search':200}) for p in ('cold','warm')]
+            runs.append(dict(case=0,variant=variant,repeat=repeat,phases=phases))
+    guards,passed=assess(runs,[0],quality_certified=True)
+    assert not passed and all(g['selection_rate']==0 for g in guards)
+    for r in runs:
+        if r['variant']=='auto':
+            for p in r['phases']:p['decisions']={'filter-first':0,'search-first':200}
+    assert assess(runs,[0],quality_certified=True)[1]
+    runs[-1]['phases'][0]['model_coverage']['ann-search']=0
+    assert not assess(runs,[0],quality_certified=True)[1]
+
+
+def test_correctness_short_samples_do_not_compute_p95():
+    runs=[dict(case=0,variant=v,repeat=r,phases=[dict(name=p,requests=2,p50_ms=10.,p95_ms=None,
+         planner_feedback_p95_ms=.1,decisions={},model_coverage={}) for p in ('cold','warm')])
+         for r in (1,2,3) for v in ('filter-first','search-first','auto')]
+    guards,passed=helpers()['assess_performance'](runs,[0],quality_certified=True)
+    assert not passed and all(g['status']=='insufficient_evidence' for g in guards)
+
+
+def test_validation_wire_bytes_do_not_fit_preprocessing(monkeypatch):
+    import sys
+    directory=Path(__file__).resolve().parents[2]/'benchmarks/p4'
+    monkeypatch.syspath_prepend(str(directory))
+    evidence=runpy.run_path(str(directory/'adaptive_evidence.py'))
+    function=evidence['fit_training_wire_layout']
+    def row(i,byte_count):
+        return dict(query_id=i,plan={'counts':dict(vectors_fetched=1,rpc_calls=4,
+            metadata_rows_returned=10,candidates_checked=10,rpc_payload_bytes=byte_count)})
+    first=function([row(0,1000),row(1,2000),row(96,3000)],4,{},[96])
+    second=function([row(0,1000),row(1,2000),row(96,999999)],4,{},[96])
+    assert first==second
