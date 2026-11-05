@@ -109,3 +109,21 @@ conda run --no-capture-output -n vecstor vecstor --help
 ### 同日补注册与无临时路径复验
 
 按用户授权执行 `python -m pip install --no-deps --no-build-isolation -e .`，仅注册本项目 `vecstor 0.2.5.dev0`，没有安装额外依赖。清除PYTHONPATH后，`vecstor --help`、模块导入和pip check通过；强制真实GPU的完整回归 **632通过，180.97秒，无跳过**。原迁移遗漏已修复；保留上面的初检失败记录，不将条件复测替换为无条件成功。证据为同一results目录的registration-suite.log和registration-recheck.json。
+
+## 2026-11-04 CompShare容器部署（验收中）
+
+云端使用既有Conda建立独立`vecstor`环境，不更新base或驱动。起始源码为功能分支`ce5ae23`的已提交归档，不包含本机无关修改或数据；后续非零GPU设备修复单独记录源码哈希。云端实际硬件为EPYC 7B13、20个逻辑CPU可用、90GiB内存、RTX4090约48GiB显存、驱动610.57.04，Linux 6.12.101、Landlock ABI6，100GB容器文件系统。
+
+公网下载CUDA大包较慢，保留原任务日志并停止该部署任务，改为上传本机缓存的78个安装包。上传前和云端解包后均按原锁文件逐包核对MD5；使用`file://...#md5`的临时explicit清单离线创建环境，再以`pip install --no-deps --no-build-isolation -e .`注册项目。下载URL不同不改变包内容；安装后按包文件名、版本构建和MD5对照原锁文件，78包一致，pip check通过。临时离线清单不替换仓库的原始锁文件。
+
+首次GPU组件检查通过，但真实GPU隔离验收失败：容器暴露`/dev/nvidia6`，既有规则硬编码`/dev/nvidia0`，导致隔离后的GPU worker报`gpu_unavailable`。修复仅枚举可见的编号NVIDIA字符设备，保留原控制设备，拒绝普通文件、软链接及无关名称；不放开整个`/dev`写权限，CUDA逻辑设备仍为0。三项新回归先失败，再与既有隔离测试合计4项通过；云端1万行真实GPU、PTY、计算/worker存储拒读及恢复验收已通过。完整无PYTHONPATH回归正在运行，尚未据此宣布云端业务验收完成。
+
+证据分别保留在云端`results/cloud-deployment/`（初次环境与隔离失败）、`results/cloud-validation-gpu-node/`（修复后环境/完整回归）和`results/cloud-gpu-isolation-fixed/`（真实GPU隔离）。所有长任务通过CompShare durable job运行，可在SSH断开后继续；先查任务状态再恢复，避免重复提交。具体实例ID和操作清单存于本机Git忽略的`results/`云端部署记录中。
+
+迁移后成本模型必须重新校准，不能把本机模型的硬件/网络指纹改名冒充云端证据。为修复运行时代码而结束的本机旧版评估，保留75个完整计时配置/24150条查询及前4组完整auto留出；未完成部分明确中断，不将其拼接到新源码云端矩阵。
+
+### 2026-11-05回归失败与独立复现
+
+实例重启中断首次完整回归后，在新目录重跑。真实GPU与隔离再次通过；完整回归结果为940通过、1失败、5错误，耗时1366.43秒。6项失败均发生在默认15秒导入期限：`test_catalog.py::test_import_batches_preserve_large_ids_and_float32_values`，以及`test_index_catalog.py`的同操作重放、其他表写入后提交（两个参数）、同名表重建、结束租约释放发布槽位的fixture。
+
+没有修改源码或超时限制，单独重跑上述两个测试文件，32项全部通过（25.63秒），对应导入约1.8秒。检查时没有遗留业务进程，也未观察到CPU cgroup限流；该证据不足以确定首次失败是资源波动还是测试间影响。原失败日志与JUnit保留在`results/cloud-validation-20261105/`，独立复现为`import-diagnostic.xml`。随后在`results/cloud-validation-retry-20261105/`按相同参数完整复跑，零失败、零错误、零跳过才允许继续pilot、校准和代表性主矩阵。当前尚不能宣称云端完整回归通过。
