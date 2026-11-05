@@ -2,7 +2,7 @@
 
 本文件适用于整个项目，供团队成员与开发代理共同遵循。记录项目实施计划、目录结构、技术栈和开发约束；后续开发应同步维护，避免文档与实际实现脱节。
 
-最后更新：2026-11-04。
+最后更新：2026-11-05。
 
 ## 1. 项目背景与当前状态
 
@@ -62,7 +62,7 @@
 | gRPC / Protobuf | 查询、目录、类型化 SQL 结果与读租约 | grpcio/grpcio-tools 1.83.1、protobuf 7.35.1；兼容 P2 v1 并新增 P2.5 v2；P4已接入类型化工件发布/分发与能力确认 |
 | prompt_toolkit / Rich | 多行终端、历史/补全与表格 | 3.0.53 / 15.0.0，已通过 Conda 安装并锁定 |
 | Arrow Flight | 批量列式数据传输 | 可选，只有测出传输瓶颈后再评估 |
-| pytest | 正确性、接口与集成测试 | 9.1.1；自适应审查修复后943项完整真实GPU回归通过（零跳过），覆盖P1/P2/P2.5/P3/质量/GPU/P4索引与缓存，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
+| pytest | 正确性、接口与集成测试 | 9.1.1；云端部署及导入转换修复后948项完整真实GPU回归通过（零跳过），覆盖P1/P2/P2.5/P3/质量/GPU/P4索引与缓存，包含真实 PTY、gRPC、版本索引、并发租约、重启和隔离；命令 `python -m pytest -q` |
 | 容器与部署脚本 | 隔离部署、复现实验 | 随原型补充，不先引入复杂集群平台 |
 
 安装状态与业务集成状态必须分开记录。通过 Conda 管理依赖，不混用 uv/pip 覆盖 Conda 管理的 Faiss、NumPy 和 CUDA 库。`environment.yml` 固定直接依赖，`environments/vecstor-linux-64.explicit.txt` 固定全部 Conda 包的构建和 MD5。保留 CPU 后端，GPU 计算使用本机已有设备。
@@ -370,3 +370,5 @@ index/与storage/已支持权威索引持久发布与完整重建，cache/及读
 - FilterCandidateVectors保持同租约/版本、输入ID存在性及顺序验证，共用4扫描名额，最多1024行/1MiB向量/4MiB消息。仅特定响应超大错误可拆分或单行退回两步读取，并记录mixed路径；其他错误直接传播。
 - 合并读取默认关闭，计算端显式--fused-candidates且存储能力确认后启用；SQL candidate_data_path=default|separate|fused，fused仅approx/search-first。优化不得改变候选预算、质量配置或设备策略。
 - 性能对照固定参数/查询、复用每工作线程会话，控制面RPC和存储RPC分开。未测CUDA事件时kernel/H2D/D2H为null；原生批摊销不能代替端到端结果，退化必须报告。
+
+2026-11-05云端部署补充：容器GPU物理节点可能为/dev/nvidia6等非零编号，隔离仅枚举可见的编号NVIDIA字符设备并拒绝普通文件/软链接，CUDA逻辑设备仍为0。托管导入元数据采用JSON字符串参数并显式转为类型化数组，避免DuckDB对Python列表逐标量反复探测缺失pandas；保留1024行批次、事务/幂等/取消和15秒默认期限。云端完整真实GPU、无PYTHONPATH回归948通过（342.91秒，零失败/错误/跳过），GPU/PTY/文件隔离通过；成本模型需按新源码与云端环境重新校准，性能验收仍在进行。

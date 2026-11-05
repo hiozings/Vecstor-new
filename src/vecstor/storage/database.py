@@ -223,11 +223,16 @@ class Database:
                 # Python floats is expensive. The fixed-array cast remains SQL
                 # parameter binding, and JSON preserves finite float32 values.
                 vectors = json.dumps(data.vectors[batch].tolist(), allow_nan=False, separators=(',', ':'))
+                # Binding Python lists triggers per-scalar optional pandas probes in DuckDB.
+                # JSON parameters preserve integer widths and string escaping without SQL interpolation.
+                metadata = [json.dumps(column[batch].tolist(), ensure_ascii=False, allow_nan=False,
+                                       separators=(',', ':'))
+                            for column in (data.ids, data.categories, data.timestamps, data.values)]
                 self.connection.execute(
-                    f"INSERT INTO {identifier(table)} SELECT unnest(CAST(? AS BIGINT[])), unnest(?::VARCHAR[]), "
-                    f"unnest(CAST(? AS BIGINT[])), unnest(?::DOUBLE[]), unnest(?::FLOAT[{data.dimension}][])",
-                    [data.ids[batch].tolist(), data.categories[batch].tolist(), data.timestamps[batch].tolist(),
-                     data.values[batch].tolist(), vectors])
+                    f"INSERT INTO {identifier(table)} SELECT unnest(CAST(? AS JSON)::BIGINT[]), "
+                    f"unnest(CAST(? AS JSON)::VARCHAR[]), unnest(CAST(? AS JSON)::BIGINT[]), "
+                    f"unnest(CAST(? AS JSON)::DOUBLE[]), unnest(?::FLOAT[{data.dimension}][])",
+                    [*metadata, vectors])
                 self._check_time()
             self._validate_table(table, creating=True)
             return result(affected_rows=data.size, source_sha256=source_digest)

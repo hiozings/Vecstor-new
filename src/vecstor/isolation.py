@@ -11,6 +11,17 @@ import platform
 import sys
 
 
+def _gpu_device_paths(device_dir=Path('/dev')):
+    """Only actual visible NVIDIA character devices, independent of CUDA ordinals."""
+    paths=[device_dir/name for name in ('null','nvidiactl','nvidia-uvm','nvidia-uvm-tools')]
+    for path in sorted(device_dir.glob('nvidia*')):
+        suffix=path.name.removeprefix('nvidia')
+        if suffix and suffix.isascii() and suffix.isdigit():
+            paths.append(path)
+    return tuple(path for path in paths
+                 if path.exists() and not path.is_symlink() and path.is_char_device())
+
+
 def restrict_compute_filesystem(storage_dir, gpu=False):
     if sys.platform != "linux" or platform.machine() not in {"x86_64", "aarch64"}:
         raise RuntimeError("Landlock acceptance requires Linux x86_64/aarch64")
@@ -73,9 +84,7 @@ def restrict_compute_filesystem(storage_dir, gpu=False):
                 checked(libc.syscall(445,rules_fd,1,ctypes.byref(attr),0),'add CUDA procfs rule')
             finally:os.close(procfd)
             # CUDA needs writable character devices, never storage files/directories.
-            for name in ('/dev/null','/dev/nvidia0','/dev/nvidiactl','/dev/nvidia-uvm','/dev/nvidia-uvm-tools'):
-                path=Path(name)
-                if not path.exists():continue
+            for path in _gpu_device_paths():
                 fd=os.open(path,os.O_PATH|os.O_CLOEXEC)
                 try:
                     attr=PathRule((1<<1)|(1<<2),fd)
