@@ -42,6 +42,10 @@ def freeze(value):
 
 def plain(value):
     if value is None or type(value) in (str, int, float, bool):return value
+    if isinstance(value,FrozenMap) or type(value) is dict:
+        return {key:plain(item) for key,item in value.items()}
+    if isinstance(value,(FrozenValues,DeploymentContext,DataScope,SearchOptions)):
+        return {key:plain(item) for key,item in vars(value).items()}
     if is_dataclass(value):
         return {field.name: plain(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):

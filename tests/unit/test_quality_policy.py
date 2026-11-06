@@ -31,6 +31,20 @@ def test_profile_applies_calibrated_floor_and_records_offline_basis():
     assert 'online_recall' not in description
 
 
+def test_planning_description_is_immutable_but_scope_is_rechecked():
+    from vecstor.query.quality_policy import QualityUnavailable
+    catalog,p,key,plan=setup()
+    options=SearchOptions(mode='approx')
+    _,description=catalog.resolve(p['profile_id'],key,256,100000,plan,options,immutable_description=True)
+    with pytest.raises(TypeError):description['budget']['nprobe_floor']=0
+    with pytest.raises(QualityUnavailable,match='scope'):
+        catalog.resolve(p['profile_id'],key,256,100000,replace(plan,query_vector=(10.,)*128),options,
+                        immutable_description=True)
+    _,ordinary=catalog.resolve(p['profile_id'],key,256,100000,plan,options)
+    ordinary['budget']['nprobe_floor']=0
+    assert description['budget']['nprobe_floor']==p['budget']['nprobe_floor']
+
+
 @pytest.mark.parametrize('changes',[dict(nprobe=1),dict(candidates=1),dict(max_candidates=1),dict(max_rounds=1)])
 def test_explicit_budget_conflict_is_not_silently_ignored(changes):
     catalog,p,key,plan=setup()

@@ -1,5 +1,5 @@
 """Snapshot-bound empirical quality profiles; never an online Recall guarantee."""
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 import math
 from types import MappingProxyType
 
@@ -100,14 +100,18 @@ class QualityProfile:
     def describe(self):
         evidence=dict(self.evidence)
         return {'device':dict(self.execution).get('device','cpu'),'backend_evidence':dict(self.execution),'profile_id':self.profile_id,'database_id':self.key.database_id,'table_id':self.key.table_id,'revision':self.key.revision,
-                'path':self.path,'k':self.k,'metadata_sql':self.metadata_sql,'budget':asdict(self.budget),
+                'path':self.path,'k':self.k,'metadata_sql':self.metadata_sql,'budget':vars(self.budget).copy(),
                 'calibration_queries':evidence['calibration_queries'],'evaluation_queries':evidence['evaluation_queries'],
                 'evaluation_mean_recall':evidence['evaluation_mean_recall'],'quality_basis':'offline empirical mean, not per-query guarantee',
                 'artifact_identity':dict(self.artifact_identity) if self.artifact_identity else None}
 
 
 class QualityCatalog:
-    def __init__(self,profiles=()):self._profiles=MappingProxyType({p.profile_id:p for p in profiles})
+    def __init__(self,profiles=()):
+        from vecstor.compute.planner_types import freeze
+        self._profiles=MappingProxyType({p.profile_id:p for p in profiles})
+        self._planning_descriptions=MappingProxyType({name:freeze(dict(p.describe(),state='applied',requested_id=name))
+                                                      for name,p in self._profiles.items()})
 
     @classmethod
     def from_document(cls,value):
@@ -127,7 +131,8 @@ class QualityCatalog:
 
     def list(self):return [p.describe() for p in self._profiles.values()]
 
-    def resolve(self,profile_id,key,nlist,row_count,plan,options,execution=None,artifact=None,index_source='local'):
+    def resolve(self,profile_id,key,nlist,row_count,plan,options,execution=None,artifact=None,index_source='local',
+                immutable_description=False):
         profile=self._profiles.get(profile_id)
         if profile is None:raise QualityUnavailable('quality_profile_missing')
         if index_source=='published' and not profile.artifact_identity:raise QualityUnavailable('quality_profile_artifact_unbound')
@@ -143,8 +148,11 @@ class QualityCatalog:
         if options.device=='gpu' and (profile.budget.nprobe_floor>2048 or profile.budget.initial_candidates>2048):
             raise QualityUnavailable('quality_profile_gpu_limits')
         if profile.key!=key:raise QualityUnavailable('quality_profile_version_mismatch')
-        if (profile.metadata_sql!=plan.metadata_sql or profile.k!=plan.limit or profile.path!=options.path
-            or any(not profile.query_min<=x<=profile.query_max for x in plan.query_vector)):
+        if profile.metadata_sql!=plan.metadata_sql or profile.k!=plan.limit or profile.path!=options.path:
+            raise QualityUnavailable('quality_profile_scope_mismatch')
+        import numpy as np
+        query=np.asarray(plan.query_vector)
+        if not query.size or not (profile.query_min<=float(np.min(query)) and float(np.max(query))<=profile.query_max):
             raise QualityUnavailable('quality_profile_scope_mismatch')
         budget=profile.budget
         if budget.nprobe_floor>nlist or budget.max_candidates>row_count:
@@ -156,4 +164,6 @@ class QualityCatalog:
             if explicit is not None and explicit<floor:raise ValueError(f'Quality profile {name} budget conflict')
         effective=replace(options,**{name:getattr(options,name) if getattr(options,name) is not None else floor for name,floor in required.items()}).validate()
         if effective.nprobe>nlist:raise ValueError('Quality profile nprobe exceeds nlist')
-        return effective,dict(profile.describe(),state='applied',requested_id=profile_id)
+        description=(self._planning_descriptions[profile_id] if immutable_description
+                     else dict(profile.describe(),state='applied',requested_id=profile_id))
+        return effective,description

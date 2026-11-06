@@ -1,5 +1,6 @@
 """Resolve legal candidates using already pinned artifacts and the same lease."""
 from dataclasses import replace
+from functools import lru_cache
 from types import SimpleNamespace
 import hashlib
 import json
@@ -22,7 +23,7 @@ def artifact_identity(entry):
                 build_fingerprint=descriptor.key.build_fingerprint)
 
 
-def execution_signature(options, read_settings=None):
+def _execution_signature(options, read_settings=None):
     options.validate()
     values={key:getattr(options,key) for key in options.__dataclass_fields__};effective=dict(read_settings or {})
     if read_settings is not None:
@@ -33,6 +34,24 @@ def execution_signature(options, read_settings=None):
             values.pop(key)
     return hashlib.sha256(json.dumps(dict(options=values,read_settings=effective),sort_keys=True,
                                      separators=(',',':'),allow_nan=False).encode()).hexdigest()
+
+
+@lru_cache(maxsize=256)
+def _cached_execution_signature(options, read_items):
+    return _execution_signature(options,None if read_items is None else dict(read_items))
+
+
+def execution_signature(options, read_settings=None):
+    # A bounded pure-conversion cache: no data, query results, or live index objects.
+    items=None if read_settings is None else tuple(sorted(read_settings.items()))
+    def small(value):
+        if type(value) in (bool,int):return abs(value)<2**64
+        if type(value) is str:return len(value)<=128
+        return type(value) is tuple and len(value)<=16 and all(type(x) is str and len(x)<=128 for x in value)
+    if items is not None and (len(items)>16 or any(type(k) is not str or len(k)>64 or not small(v) for k,v in items)):
+        return _execution_signature(options,read_settings)
+    try:return _cached_execution_signature(options,items)
+    except TypeError:return _execution_signature(options,read_settings)
 
 
 def qualify_candidates(plan, options, lease, pinned_cpu_entry, quality_catalog, policy_match,
@@ -62,7 +81,7 @@ def qualify_candidates(plan, options, lease, pinned_cpu_entry, quality_catalog, 
             try:
                 effective,description=quality_catalog.resolve(profile_id,entry.key,entry.handle.nlist,
                     entry.handle.row_count,plan,concrete,execution=entry.statistics,
-                    artifact=entry.descriptor,index_source='published')
+                    artifact=entry.descriptor,index_source='published',immutable_description=True)
             except QualityUnavailable as error:
                 diagnostics[name]=error.reason;continue
             except ValueError as error:

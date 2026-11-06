@@ -1,5 +1,5 @@
 """Immutable per-request search controls; absence preserves exact behavior."""
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import re
 
 
@@ -66,7 +66,8 @@ class SearchOptions:
 
     def to_dict(self):
         self.validate()
-        return asdict(self)
+        # All option fields are immutable scalars; deepcopy is unnecessary.
+        return {name:getattr(self,name) for name in self.__dataclass_fields__}
 
     def to_proto(self):
         from vecstor.rpc.sql_pb2 import SearchOptions as Message

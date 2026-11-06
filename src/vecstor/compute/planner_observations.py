@@ -67,7 +67,9 @@ class ObservationStore:
                     if set(row)!={'new_candidates','matched_candidates'} or any(type(v) is not int or not 0<=v<2**64 for v in row.values()):
                         raise ValueError('Invalid observed round')
             elif type(value) is not int or not 0<=value<2**64:raise ValueError('Invalid observation count')
-        if len(json.dumps(plain(observation),allow_nan=False).encode())>self.entry_charge:
+        values=dict(observation.values)
+        if 'rounds' in values:values['rounds']=[dict(row) for row in values['rounds']]
+        if len(json.dumps({'key':observation.key,'values':values},allow_nan=False).encode())>self.entry_charge:
             raise ValueError('Observation exceeds fixed charge')
         with self._lock:
             if observation.key not in self._records and len(self._records)>=self.max_entries:
