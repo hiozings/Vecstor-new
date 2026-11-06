@@ -17,6 +17,23 @@ from vecstor.query.statements import classify_statement
 from vecstor.index.artifact import ArtifactError
 
 
+def test_signature_cache_does_not_accept_boolean_alias_of_integer_budget():
+    from vecstor.compute.planning_inputs import execution_signature
+    execution_signature(SearchOptions(mode='approx',nprobe=1),{})
+    with pytest.raises(ValueError):execution_signature(SearchOptions(mode='approx',nprobe=True),{})
+
+
+def test_signature_cache_accepts_bounded_actual_projection_shape():
+    from vecstor.compute.planning_inputs import execution_signature, _cached_execution_signature
+    options=SearchOptions(mode='approx',path='search-first')
+    read=dict(projection_fields=(('id','id'),('category','label')),cache_enabled=True)
+    _cached_execution_signature.cache_clear()
+    first=execution_signature(options,read)
+    assert execution_signature(options,read)==first
+    assert _cached_execution_signature.cache_info().hits==1
+    assert execution_signature(options,dict(read,projection_fields=(('id','other'),)))!=first
+
+
 @pytest.fixture
 def qualification(cpu_artifact):
     descriptor=cpu_artifact[0]

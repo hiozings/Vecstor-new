@@ -43,12 +43,16 @@ def _cached_execution_signature(options, read_items):
 
 def execution_signature(options, read_settings=None):
     # A bounded pure-conversion cache: no data, query results, or live index objects.
+    options.validate()
     items=None if read_settings is None else tuple(sorted(read_settings.items()))
     def small(value):
         if type(value) in (bool,int):return abs(value)<2**64
         if type(value) is str:return len(value)<=128
-        return type(value) is tuple and len(value)<=16 and all(type(x) is str and len(x)<=128 for x in value)
-    if items is not None and (len(items)>16 or any(type(k) is not str or len(k)>64 or not small(v) for k,v in items)):
+        if type(value) is not tuple or len(value)>16:return False
+        return all((type(x) is str and len(x)<=128) or
+                   (type(x) is tuple and len(x)<=2 and all(type(s) is str and len(s)<=128 for s in x)) for x in value)
+    if items is not None and (len(items)>16 or any(type(k) is not str or len(k)>64 or
+        (type(v) is tuple and k!='projection_fields') or not small(v) for k,v in items)):
         return _execution_signature(options,read_settings)
     try:return _cached_execution_signature(options,items)
     except TypeError:return _execution_signature(options,read_settings)
