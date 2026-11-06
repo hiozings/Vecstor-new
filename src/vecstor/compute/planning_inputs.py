@@ -119,7 +119,9 @@ def collect_planning_inputs(plan, lease, entry, candidates, policy_match, policy
             risk=lookup(observation_key(inputs,'risk',candidate))
             statistics['risk_unknown'][candidate.candidate_id]=bool(risk and risk.values.get('budget_failure'))
             residual=lookup(observation_key(inputs,'cost',candidate))
-            if residual:statistics.setdefault('residual_ms',{})[candidate.candidate_id]=residual.values.get('residual_ms',0.)
+            if residual:
+                statistics.setdefault('residual_ms',{})[candidate.candidate_id]=residual.values.get('residual_ms',0.)
+                statistics.setdefault('bias_ms',{})[candidate.candidate_id]=residual.values.get('bias_ms',0.)
     return PlanningInputs(scope,identity,n,lease.dimension,plan.limit,metadata_hash,query_hash,
         candidates,candidates[0].candidate_id,statistics,cache_snapshot,deployment_context,
         policy.policy_id if policy else None,policy.policy_hash if policy else None,remaining_ms)

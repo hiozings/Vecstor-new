@@ -65,10 +65,15 @@ def finish_adaptive(inputs, resolved, trace, cache, observations, elapsed_ms, ch
         estimate=next(e for e in resolved.decision.estimates if e.candidate_id==resolved.candidate.candidate_id)
         if estimate.mean_ms is not None:
             key=observation_key(inputs,'cost',resolved.candidate)
-            error=abs(max(0.,elapsed_ms-trace['adaptive']['planner_ms'])-estimate.mean_ms)
+            base=(estimate.components or {}).get('base_mean_ms',estimate.mean_ms)
+            target_bias=max(0.,elapsed_ms-trace['adaptive']['planner_ms'])-base
             previous=observations.peek(key)
-            ewma=error if previous is None else .8*previous.values['residual_ms']+.2*error
-            pending.append(Observation(key,{'residual_ms':ewma}))
+            values=previous.values if previous is not None else {}
+            prior_bias=values.get('bias_ms',0.)
+            error=target_bias-prior_bias
+            bias=prior_bias+.2*error
+            ewma=.8*values.get('residual_ms',0.)+.2*abs(error)
+            pending.append(Observation(key,{'residual_ms':ewma,'bias_ms':bias}))
         observations.record_many(pending,check=check)
         trace['adaptive']['observation_entries']=observations.stats()['entries']
     trace['adaptive']['feedback_ms']=(time.monotonic()-started)*1000

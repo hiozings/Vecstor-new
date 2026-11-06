@@ -115,7 +115,7 @@ def _estimate_candidate(candidate, inputs, policy, *, _common_calls=2, _memo=Non
     rpc=features['rpc_calls'];payload=features['payload_bytes']
     details['base_rpc_calls']=rpc
     residual=max(model['residual_ms'],inputs.statistics.get('residual_ms',{}).get(candidate.candidate_id,0.))
-    upper=mean+residual;lower=max(0.,mean-residual)
+    upper=mean+residual;lower=mean-residual
     if details['predicted_mode']=='exact':risk=0.
     elif candidate.options.fallback=='exact':
         exact=next((c for c in inputs.candidates if c.mode=='exact'),None)
@@ -132,8 +132,13 @@ def _estimate_candidate(candidate, inputs, policy, *, _common_calls=2, _memo=Non
         vectors+=probability*remaining.vectors_reranked;misses+=probability*remaining.vectors_missed
         details.update(fallback_probability=probability,fallback_remaining_ms=remaining.mean_ms,
                        fallback_rpc_calls=remaining.rpc_calls)
-    if not all(math.isfinite(v) and v>=0 for v in (mean,lower,upper)):
+    bias=inputs.statistics.get('bias_ms',{}).get(candidate.candidate_id,0.)
+    details['base_mean_ms']=mean
+    mean+=bias;lower+=bias;upper+=bias
+    if not all(math.isfinite(v) for v in (mean,lower,upper)):
         return unknown(reason='nonfinite_cost')
+    mean=max(0.,mean);lower=max(0.,lower);upper=max(0.,upper)
+    details['observed_bias_ms']=bias
     upper=max(upper,mean);lower=min(lower,mean)
     return CandidateEstimate(candidate.candidate_id,mean_ms=mean,lower_ms=lower,upper_ms=upper,
         rpc_calls=rpc,payload_bytes=payload,vectors_reranked=vectors,

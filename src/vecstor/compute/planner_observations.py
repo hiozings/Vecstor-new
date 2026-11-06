@@ -52,14 +52,14 @@ class ObservationStore:
         if not 1 <= len(observation.key) <= 8 or any(not isinstance(k,str) or len(k)>128 for k in observation.key):
             raise ValueError('Invalid observation key')
         fields={'matched_rows','conflict','warm','admission_generation','loss_generation',
-                'budget_failure','residual_ms','rounds','hit_rows','lookup_rows'}
+                'budget_failure','residual_ms','bias_ms','rounds','hit_rows','lookup_rows'}
         if not set(observation.values).issubset(fields):raise ValueError('Invalid observation fields')
         for key,value in observation.values.items():
             if key in ('conflict','warm','budget_failure'):
                 if type(value) is not bool:raise ValueError('Invalid observation flag')
             elif key=='matched_rows' and value is None:pass
-            elif key=='residual_ms':
-                if type(value) not in (int,float) or not math.isfinite(value) or value<0:
+            elif key in ('residual_ms','bias_ms'):
+                if type(value) not in (int,float) or not math.isfinite(value) or (key=='residual_ms' and value<0):
                     raise ValueError('Invalid observation residual')
             elif key=='rounds':
                 if len(value)>32:raise ValueError('Too many observed rounds')

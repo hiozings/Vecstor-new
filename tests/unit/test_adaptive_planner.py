@@ -149,6 +149,64 @@ def test_failed_cost_validation_preserves_risk_without_publishing_cost(adaptive_
     assert estimate.failure_upper<.01
 
 
+def test_directional_cost_bias_moves_center_instead_of_only_lowering_bound(adaptive_document):
+    data=inputs(adaptive_document)
+    changed=replace(data,statistics=dict(data.statistics,bias_ms={'ann-filter':80.},
+                                        residual_ms={'ann-filter':5.}))
+    estimate=estimate_candidate(changed.candidates[0],changed,None)
+    assert estimate.mean_ms==110.
+    assert estimate.lower_ms==105.
+    assert choose_plan(changed,None).executed_id=='ann-search'
+
+
+def test_first_feedback_sample_has_bounded_influence(adaptive_document):
+    from vecstor.compute.adaptive_execution import finish_adaptive
+    from vecstor.compute.planner_observations import ObservationStore,observation_key
+    from vecstor.compute.planner_types import ResolvedPlan
+    data=inputs(adaptive_document)
+    decision=choose_plan(data,None);selected=data.candidates[1]
+    store=ObservationStore()
+    trace={'actual_path':'search-first','actual_mode':'approx','counts':{},'adaptive':{'planner_ms':0.}}
+    finish_adaptive(data,ResolvedPlan(selected,decision),trace,None,store,100.,lambda:None)
+    values=store.peek(observation_key(data,'cost',selected)).values
+    assert values['bias_ms']==18.
+    assert values['residual_ms']==18.
+
+
+def test_feedback_expiry_does_not_treat_old_bias_as_new_negative_error(adaptive_document):
+    from vecstor.compute.adaptive_execution import finish_adaptive
+    from vecstor.compute.planner_observations import ObservationStore,observation_key
+    from vecstor.compute.planner_types import ResolvedPlan
+    data=inputs(adaptive_document)
+    data=replace(data,statistics=dict(data.statistics,bias_ms={'ann-search':80.}))
+    decision=choose_plan(data,None);selected=data.candidates[1]
+    store=ObservationStore()  # Cost observation expired after planning.
+    trace={'actual_path':'search-first','actual_mode':'approx','counts':{},'adaptive':{'planner_ms':0.}}
+    finish_adaptive(data,ResolvedPlan(selected,decision),trace,None,store,10.,lambda:None)
+    assert store.peek(observation_key(data,'cost',selected)).values['bias_ms']==0.
+
+
+def test_case7_slow_first_sample_does_not_lock_queries_to_filter(adaptive_document):
+    from vecstor.compute.adaptive_execution import finish_adaptive
+    from vecstor.compute.planner_observations import ObservationStore,observation_key
+    from vecstor.compute.planner_types import ResolvedPlan
+    data=inputs(adaptive_document)
+    models=[plain(m) for m in data.statistics['models']]
+    models[0].update(coefficients={'intercept':175.},residual_ms=20.)
+    models[1].update(coefficients={'intercept':64.},residual_ms=18.)
+    data=replace(data,statistics=dict(data.statistics,models=models))
+    store=ObservationStore()
+    for actual in (152.,64.,64.,64.):
+        decision=choose_plan(data,None)
+        assert decision.executed_id=='ann-search'
+        selected=data.candidates[1]
+        trace={'actual_path':'search-first','actual_mode':'approx','counts':{},'adaptive':{'planner_ms':0.}}
+        finish_adaptive(data,ResolvedPlan(selected,decision),trace,None,store,actual,lambda:None)
+        observed=store.peek(observation_key(data,'cost',selected)).values
+        data=replace(data,statistics=dict(data.statistics,bias_ms={'ann-search':observed['bias_ms']},
+                                         residual_ms={'ann-search':observed['residual_ms']}))
+
+
 def test_predicted_fallback_adds_scan_without_second_read_lease(adaptive_document):
     data=inputs(adaptive_document,matched=1000,q=.0001,fallback='exact')
     estimate=estimate_candidate(data.candidates[1],data,None)
