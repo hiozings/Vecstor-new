@@ -96,23 +96,26 @@ def _estimate_candidate(candidate, inputs, policy, *, _common_calls=2, _memo=Non
         return unknown()
     if candidate.mode=='approx' and not inputs.statistics.get('nlist'):return unknown()
     evidence=model['evidence']
-    if evidence['median_relative_error']>.2 or evidence['p90_relative_error']>.4:
-        return unknown(reason='cost_validation_failed')
     parameters=getattr(policy,'parameters',DEFAULT_PARAMETERS)
     features,details,workspace,vectors,misses=forecast_features(candidate,inputs,model,common_calls=_common_calls,
         use_cache_evidence=parameters['use_cache_evidence'],use_candidate_correlation=parameters['use_candidate_correlation'])
     if workspace>parameters['filter_workspace_bytes']:
         return unknown(eligible=False,reason='filter_working_set_budget',workspace_bytes=workspace,components=details)
+    measured=model['statistics'];attempts=measured['failure_queries'];failures=measured['failure_count']
+    risk=failure_upper(attempts,failures)
+    if inputs.statistics.get('risk_unknown',{}).get(candidate.candidate_id) or details['forecast_exhausted']:
+        risk=None
+    if details['predicted_mode']=='exact':risk=0.
+    if (not model.get('cost_usable',True) or evidence['median_relative_error']>.2
+            or evidence['p90_relative_error']>.4):
+        return unknown(reason='cost_validation_failed',failure_upper=risk,
+                       workspace_bytes=workspace,components=details)
     mean=sum(features[key]*value for key,value in model['coefficients'].items()
              if parameters['include_transfer_cost'] or key not in ('rpc_calls','payload_bytes'))
     rpc=features['rpc_calls'];payload=features['payload_bytes']
     details['base_rpc_calls']=rpc
     residual=max(model['residual_ms'],inputs.statistics.get('residual_ms',{}).get(candidate.candidate_id,0.))
     upper=mean+residual;lower=max(0.,mean-residual)
-    measured=model['statistics'];attempts=measured['failure_queries'];failures=measured['failure_count']
-    risk=failure_upper(attempts,failures)
-    if inputs.statistics.get('risk_unknown',{}).get(candidate.candidate_id) or details['forecast_exhausted']:
-        risk=None
     if details['predicted_mode']=='exact':risk=0.
     elif candidate.options.fallback=='exact':
         exact=next((c for c in inputs.candidates if c.mode=='exact'),None)

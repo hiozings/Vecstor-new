@@ -126,6 +126,29 @@ def test_unknown_cost_never_becomes_zero_ms(adaptive_document):
     assert all(e.mean_ms is None for e in decision.estimates)
 
 
+def test_rejected_cost_does_not_erase_valid_failure_evidence(adaptive_document):
+    data=inputs(adaptive_document)
+    models=[plain(m) for m in data.statistics['models']]
+    models[0]['cost_usable']=False
+    changed=replace(data,statistics=dict(data.statistics,models=models))
+    estimate=estimate_candidate(changed.candidates[0],changed,None)
+    assert estimate.mean_ms is None
+    assert estimate.failure_upper<.01
+    assert choose_plan(changed,None).executed_id=='ann-filter'
+    failed=replace(changed,statistics=dict(changed.statistics,risk_unknown={'ann-filter':True}))
+    assert estimate_candidate(failed.candidates[0],failed,None).failure_upper is None
+
+
+def test_failed_cost_validation_preserves_risk_without_publishing_cost(adaptive_document):
+    data=inputs(adaptive_document)
+    models=[plain(m) for m in data.statistics['models']]
+    models[1]['evidence']['p90_relative_error']=.9
+    changed=replace(data,statistics=dict(data.statistics,models=models))
+    estimate=estimate_candidate(changed.candidates[1],changed,None)
+    assert estimate.mean_ms is None
+    assert estimate.failure_upper<.01
+
+
 def test_predicted_fallback_adds_scan_without_second_read_lease(adaptive_document):
     data=inputs(adaptive_document,matched=1000,q=.0001,fallback='exact')
     estimate=estimate_candidate(data.candidates[1],data,None)

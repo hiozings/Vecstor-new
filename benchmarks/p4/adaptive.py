@@ -243,7 +243,8 @@ def build_policy(calibration_dir, output_path):
         for path in sorted((root/'costs'/f'case-{case_id}').glob('*/report.json')):
             report=json.loads(path.read_text());raw=path.parent/'cases.jsonl'
             if hashlib.sha256(raw.read_bytes()).hexdigest()!=report['raw_sha256']:raise ValueError('Calibration raw evidence changed')
-            if report['accepted']:work['models'].append(report['model'])
+            # A rejected latency fit must not discard independent failure evidence.
+            work['models'].append(dict(report['model'],cost_usable=report['accepted']))
     document=dict(format_version=1,policy_id='p4_adaptive_frozen',workloads=list(workloads.values()))
     AdaptivePolicy.from_document(document)
     write_json(output_path,document)

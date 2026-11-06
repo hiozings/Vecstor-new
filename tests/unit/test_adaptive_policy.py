@@ -13,6 +13,23 @@ SCOPE = DataScope('epoch', 'db', 'table', 1, 'schema', 4)
 CTX = DeploymentContext('hardware', 'loopback', 1)
 
 
+def test_cost_usability_flag_is_strict_and_preserves_risk_statistics(adaptive_document):
+    model=adaptive_document['workloads'][0]['models'][0]
+    model['cost_usable']=False
+    policy=AdaptivePolicy.from_document(adaptive_document)
+    retained=match(policy,adaptive_document).models[0]
+    assert retained['cost_usable'] is False
+    assert retained['statistics']['failure_queries']==model['statistics']['failure_queries']
+    assert retained['statistics']['failure_count']==model['statistics']['failure_count']
+    model['cost_usable']=1
+    with pytest.raises(ValueError):AdaptivePolicy.from_document(adaptive_document)
+
+
+def test_malformed_model_rejected_as_value_error(adaptive_document):
+    adaptive_document['workloads'][0]['models']=[None]
+    with pytest.raises(ValueError):AdaptivePolicy.from_document(adaptive_document)
+
+
 def match(policy, document, scope=SCOPE, context=CTX, artifact=None):
     work = document['workloads'][0]
     return policy.lookup(scope, artifact or work['artifact_identity'], work['metadata_sql'], 10, context)

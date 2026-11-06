@@ -57,7 +57,10 @@ def _unique(pairs):
 
 def _model(value):
     _fields(value, ('candidate_id','execution_fingerprint','hardware_fingerprint','network_class',
-                    'concurrency_bucket','coefficients','residual_ms','statistics','evidence'))
+                    'concurrency_bucket','coefficients','residual_ms','statistics','evidence')+
+                    (('cost_usable',) if isinstance(value,dict) and 'cost_usable' in value else ()))
+    if 'cost_usable' in value and type(value['cost_usable']) is not bool:
+        raise ValueError('Invalid adaptive cost usability flag')
     if value['candidate_id'] not in ('exact','ann-filter','ann-search'):
         raise ValueError('Invalid adaptive candidate')
     _digest(value['execution_fingerprint'])
