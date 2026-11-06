@@ -18,6 +18,22 @@ def test_prepare_rejects_old_query_pool_before_creating_output(tmp_path):
     assert not output.exists()
 
 
+def test_interrupted_cost_sampling_cannot_be_resampled_in_same_experiment(tmp_path):
+    import numpy as np
+    import pytest
+    from types import SimpleNamespace
+    module=runpy.run_path(str(Path(__file__).resolve().parents[2]/'benchmarks/p4/adaptive.py'))
+    def forbidden(*args,**kwargs):raise AssertionError('resampled interrupted trial')
+    for event in ('started','received'):
+        output=tmp_path/event;output.mkdir()
+        journal=json.dumps({'event':event,'query_id':0})+'\n'
+        (output/'attempts.jsonl').write_text(journal)
+        with pytest.raises(ValueError,match='Interrupted'):
+            module['cost_samples'](SimpleNamespace(compute=forbidden),module['matrix_cases']('smoke')[0],
+                {'fit':np.zeros((4,4),dtype='<f4')},None,None,'exact','filter-first','exact',output,smoke=True)
+        assert (output/'attempts.jsonl').read_text()==journal
+
+
 def test_smoke_matrix_is_explicit_exact_only_and_cleans_processes(tmp_path):
     path=Path(__file__).resolve().parents[2]/'benchmarks/p4/adaptive.py'
     run=runpy.run_path(str(path))['run_adaptive_matrix']

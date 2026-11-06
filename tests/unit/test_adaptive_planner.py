@@ -207,6 +207,26 @@ def test_case7_slow_first_sample_does_not_lock_queries_to_filter(adaptive_docume
                                          residual_ms={'ann-search':observed['residual_ms']}))
 
 
+def test_concurrent_feedback_applies_both_samples_atomically(adaptive_document,monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from vecstor.compute.adaptive_execution import finish_adaptive
+    from vecstor.compute.planner_observations import ObservationStore,observation_key
+    from vecstor.compute.planner_types import ResolvedPlan
+    data=inputs(adaptive_document);decision=choose_plan(data,None);selected=data.candidates[1]
+    store=ObservationStore();barrier=Barrier(2);original=store.record_many
+    def synchronized(*args,**kwargs):
+        barrier.wait(timeout=5);return original(*args,**kwargs)
+    monkeypatch.setattr(store,'record_many',synchronized)
+    def finish(_):
+        trace={'actual_path':'search-first','actual_mode':'approx','counts':{},'adaptive':{'planner_ms':0.}}
+        finish_adaptive(data,ResolvedPlan(selected,decision),trace,None,store,100.,lambda:None)
+    with ThreadPoolExecutor(2) as pool:list(pool.map(finish,range(2)))
+    values=store.peek(observation_key(data,'cost',selected)).values
+    assert values['bias_ms']==pytest.approx(32.4)
+    assert values['residual_ms']==pytest.approx(28.8)
+
+
 def test_predicted_fallback_adds_scan_without_second_read_lease(adaptive_document):
     data=inputs(adaptive_document,matched=1000,q=.0001,fallback='exact')
     estimate=estimate_candidate(data.candidates[1],data,None)

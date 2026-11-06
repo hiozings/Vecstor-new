@@ -189,6 +189,8 @@ def cost_samples(group,spec,pools,quality_file,profile,mode,path,fallback,direct
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     if (directory/'report.json').exists():return json.loads((directory/'report.json').read_text())
     if (directory/'failure.json').exists():raise ValueError('Previously failed cost sampling requires new experiment')
+    if (directory/'attempts.jsonl').exists() and (directory/'attempts.jsonl').stat().st_size:
+        raise ValueError('Interrupted cost sampling requires new experiment; attempts retained')
     options=(SearchOptions(mode='exact',data_cache='on',metadata_projection='projected',candidate_data_path='separate')
              if mode=='exact' else settings_for(spec,group.descriptor,path,fallback=fallback,profile_id=profile['profile_id']))
     if mode=='exact' and (smoke or exact_fit_queries==5):

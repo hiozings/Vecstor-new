@@ -67,13 +67,7 @@ def finish_adaptive(inputs, resolved, trace, cache, observations, elapsed_ms, ch
             key=observation_key(inputs,'cost',resolved.candidate)
             base=(estimate.components or {}).get('base_mean_ms',estimate.mean_ms)
             target_bias=max(0.,elapsed_ms-trace['adaptive']['planner_ms'])-base
-            previous=observations.peek(key)
-            values=previous.values if previous is not None else {}
-            prior_bias=values.get('bias_ms',0.)
-            error=target_bias-prior_bias
-            bias=prior_bias+.2*error
-            ewma=.8*values.get('residual_ms',0.)+.2*abs(error)
-            pending.append(Observation(key,{'residual_ms':ewma,'bias_ms':bias}))
+            pending.append(Observation(key,{'bias_sample_ms':target_bias}))
         observations.record_many(pending,check=check)
         trace['adaptive']['observation_entries']=observations.stats()['entries']
     trace['adaptive']['feedback_ms']=(time.monotonic()-started)*1000

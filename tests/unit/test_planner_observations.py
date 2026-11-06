@@ -10,9 +10,23 @@ from vecstor.cache.types import CacheConfig, DataScope
 from vecstor.cache.vector_cache import VersionedVectorCache
 from vecstor.compute.planner_observations import Observation, ObservationStore, make_reuse_observation, observation_key
 from vecstor.compute.planner_types import PlanCandidate
+from vecstor.compute.planner_types import DeploymentContext
 from vecstor.query.search_options import SearchOptions
 
 SCOPE = DataScope('epoch','db','table',1,'schema',4)
+
+
+def test_cost_feedback_isolated_by_deployment_and_concurrency_bucket():
+    a=context();b=context();candidate=a.candidates[0]
+    a.context=DeploymentContext('hardware','loopback',1)
+    b.context=DeploymentContext('hardware','loopback',4)
+    assert observation_key(a,'cost',candidate)!=observation_key(b,'cost',candidate)
+    assert observation_key(a,'reuse',candidate)==observation_key(b,'reuse',candidate)
+    b.context=replace(b.context,active_vector_requests=2)
+    c=context();c.context=DeploymentContext('hardware','loopback',4)
+    assert observation_key(b,'cost',candidate)==observation_key(c,'cost',candidate)
+    b.context=replace(a.context,network_class='remote')
+    assert observation_key(a,'cost',candidate)!=observation_key(b,'cost',candidate)
 
 
 def fill(cache, ids):
@@ -120,3 +134,16 @@ def test_record_many_rollback_restores_values_and_evictions():
     assert store.peek(('a',),now=2).values['matched_rows']==1
     assert store.peek(('b',),now=2).values['matched_rows']==2
     assert store.peek(('c',),now=2) is None
+
+
+def test_atomic_cost_feedback_rollback_restores_value_and_expiry():
+    store=ObservationStore();key=('cost','scope')
+    store.record_cost(key,100.,now=0)
+    calls=[]
+    def check():
+        calls.append(1)
+        if len(calls)==2:raise RuntimeError('cancel')
+    with pytest.raises(RuntimeError,match='cancel'):
+        store.record_many([Observation(key,{'bias_sample_ms':200.})],now=1,check=check)
+    assert store.peek(key,now=2).values=={'bias_ms':20.,'residual_ms':20.}
+    assert store.peek(key,now=300) is None

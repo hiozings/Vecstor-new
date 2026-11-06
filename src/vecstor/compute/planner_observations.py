@@ -87,6 +87,16 @@ class ObservationStore:
     def note_budget_failure(self, key, now=None):
         self.record(Observation(key,{'budget_failure':True}),now)
 
+    def record_cost(self, key, sample, now=None):
+        if type(sample) not in (int,float) or not math.isfinite(sample):raise ValueError('Invalid cost sample')
+        now=self._now(now)
+        with self._lock:
+            previous=self.peek(key,now)
+            values=previous.values if previous is not None else {}
+            prior=values.get('bias_ms',0.);error=sample-prior
+            self.record(Observation(key,{'bias_ms':prior+.2*error,
+                'residual_ms':.8*values.get('residual_ms',0.)+.2*abs(error)}),now)
+
     def record_many(self, observations, now=None, check=lambda:None):
         """Commit up to four scalar observations, rolling back on cancellation.
 
@@ -105,6 +115,8 @@ class ObservationStore:
                     journal.append((key,previous,evicted))
                     if key[0]=='cardinality':
                         self.record_cardinality(key,observation.values['matched_rows'],now)
+                    elif key[0]=='cost' and set(observation.values)=={'bias_sample_ms'}:
+                        self.record_cost(key,observation.values['bias_sample_ms'],now)
                     else:self.record(observation,now)
                 check()
             except BaseException:
@@ -122,12 +134,18 @@ class ObservationStore:
                         max_entries=self.max_entries,ttl_seconds=self.ttl_seconds)
 
 
+def cost_context_hash(context):
+    return fingerprint((getattr(context,'hardware_fingerprint',None),getattr(context,'network_class',None),
+                        getattr(context,'concurrency_bucket',None)))
+
+
 def observation_key(inputs, kind, candidate=None):
     statistics=getattr(inputs,'statistics',{})
     key=(kind,statistics.get('_scope_hash') or fingerprint(inputs.scope),inputs.metadata_sql_hash)
     if kind!='cardinality':
         key+=(statistics.get('_artifact_hash') or fingerprint(inputs.artifact_identity),str(inputs.k),candidate.execution_fingerprint)
     if kind=='reuse':key+=(inputs.query_hash,)
+    if kind=='cost':key+=(statistics.get('_cost_context_hash') or cost_context_hash(getattr(inputs,'context',None)),)
     return key
 
 

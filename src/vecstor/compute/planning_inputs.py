@@ -9,7 +9,7 @@ import grpc
 import numpy as np
 
 from vecstor.cache.types import DataScope
-from vecstor.compute.planner_observations import observation_key
+from vecstor.compute.planner_observations import observation_key, cost_context_hash
 from vecstor.compute.planner_types import PlanCandidate, PlanningInputs, fingerprint
 from vecstor.index.artifact import ArtifactError
 from vecstor.query.quality_policy import QualityUnavailable
@@ -113,6 +113,7 @@ def collect_planning_inputs(plan, lease, entry, candidates, policy_match, policy
     matched=None if mismatch else policy_match.matched_rows
     identity=artifact_identity(entry)
     statistics=dict(_scope_hash=fingerprint(scope),_artifact_hash=fingerprint(identity),
+        _cost_context_hash=cost_context_hash(deployment_context),
         matched_rows=matched,cardinality_source='offline' if matched is not None else 'unknown',
         nlist=entry.handle.nlist if entry else None,models=() if mismatch else policy_match.models,
         cost_reason='table_row_count_mismatch' if mismatch else policy_match.cost_reason,
@@ -120,7 +121,7 @@ def collect_planning_inputs(plan, lease, entry, candidates, policy_match, policy
     metadata_hash=hashlib.sha256(plan.metadata_sql.encode()).hexdigest()
     query_hash=hashlib.sha256(np.asarray(plan.query_vector,dtype='<f4').tobytes()).hexdigest()
     inputs=SimpleNamespace(scope=scope,artifact_identity=identity,metadata_sql_hash=metadata_hash,
-        query_hash=query_hash,k=plan.limit,statistics=statistics)
+        query_hash=query_hash,k=plan.limit,statistics=statistics,context=deployment_context)
     if observation_store is not None:
         lookup=observation_store.peek if explain else observation_store.get
         card=lookup(observation_key(inputs,'cardinality'))
