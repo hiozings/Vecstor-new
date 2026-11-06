@@ -3,6 +3,21 @@ import json
 import runpy
 
 
+def test_prepare_rejects_old_query_pool_before_creating_output(tmp_path):
+    import hashlib
+    import numpy as np
+    import pytest
+    module=runpy.run_path(str(Path(__file__).resolve().parents[2]/'benchmarks/p4/adaptive.py'))
+    old=tmp_path/'old';query_path=old/'groups/x/queries.npz';query_path.parent.mkdir(parents=True)
+    pools=module['make_query_splits'](4,20261103,smoke=True)
+    np.savez(query_path,**pools)
+    (old/'bundle.json').write_text(json.dumps({'groups/x/queries.npz':hashlib.sha256(query_path.read_bytes()).hexdigest()}))
+    output=tmp_path/'new'
+    with pytest.raises(ValueError,match='previous'):
+        module['prepare'](output,tier='smoke',seed=20261103,exclude_calibration_dirs=[old])
+    assert not output.exists()
+
+
 def test_smoke_matrix_is_explicit_exact_only_and_cleans_processes(tmp_path):
     path=Path(__file__).resolve().parents[2]/'benchmarks/p4/adaptive.py'
     run=runpy.run_path(str(path))['run_adaptive_matrix']

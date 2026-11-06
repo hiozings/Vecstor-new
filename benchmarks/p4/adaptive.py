@@ -69,6 +69,21 @@ def verify_bundle(root):
             raise ValueError('Frozen calibration evidence changed: '+name)
 
 
+def previous_query_digests(directories):
+    excluded=set()
+    for directory in directories:
+        root=Path(directory).resolve();verify_bundle(root)
+        bundle=json.loads((root/'bundle.json').read_text())
+        paths=list((root/'groups').glob('*/queries.npz'))
+        if not paths:raise ValueError('Previous evidence has no query pools')
+        for path in paths:
+            if str(path.relative_to(root)) not in bundle:raise ValueError('Previous query pool is not frozen')
+            with np.load(path,allow_pickle=False) as pools:
+                for name in pools.files:
+                    for query in pools[name]:excluded.add(query_digest(query))
+    return excluded
+
+
 class Group:
     def __init__(self,directory,spec,*,create=False,processes=None):
         self.directory=Path(directory);self.spec=spec
@@ -124,10 +139,10 @@ class Group:
     def close(self):self.stack.close()
 
 
-def timed_query(client,spec,query,group):
+def timed_query(client,spec,query,group,*,validate=True):
     began=time.perf_counter();result=client.execute(sql_for(spec,query));elapsed=(time.perf_counter()-began)*1000
-    record=dict(query_digest=query_digest(query),query=query.tolist(),ms=elapsed,plan=result['execution_plan'],rows=result['rows'])
-    record.update(group.oracle.validate(spec,query,result,group.descriptor))
+    record=dict(query_digest=query_digest(query),query=query.tolist(),ms=elapsed,plan=result['execution_plan'],rows=result['rows'],revision=result['revision'])
+    if validate:record.update(group.oracle.validate(spec,query,result,group.descriptor))
     return record
 
 
@@ -173,6 +188,7 @@ def quality_component(group,spec,pools,output):
 def cost_samples(group,spec,pools,quality_file,profile,mode,path,fallback,directory,smoke=False,exact_fit_queries=5):
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     if (directory/'report.json').exists():return json.loads((directory/'report.json').read_text())
+    if (directory/'failure.json').exists():raise ValueError('Previously failed cost sampling requires new experiment')
     options=(SearchOptions(mode='exact',data_cache='on',metadata_projection='projected',candidate_data_path='separate')
              if mode=='exact' else settings_for(spec,group.descriptor,path,fallback=fallback,profile_id=profile['profile_id']))
     if mode=='exact' and (smoke or exact_fit_queries==5):
@@ -184,28 +200,50 @@ def cost_samples(group,spec,pools,quality_file,profile,mode,path,fallback,direct
         split=2 if smoke else 96
         indices=list(range(len(pools['fit'])));validation_indices=list(range(split,len(pools['fit'])));repeats=1
     read=read_configuration(spec,pools['fit'][0]);records=[];stats_records=[]
-    hardware=None;started=time.monotonic()
-    with group.compute('cost',capacity=spec['capacity_mib'],quality=quality_file) as (client,process):
+    hardware=None;started=time.monotonic();resources={}
+    order_seed=int(query_digest(pools['fit'][0])[:16],16)
+    rng=np.random.default_rng(order_seed)
+    raw=directory/'cases.jsonl';attempts=directory/'attempts.jsonl'
+    for prior in (raw,attempts):
+        if prior.exists():prior.rename(directory/f'{prior.stem}.incomplete-{time.time_ns()}.jsonl')
+    with ExitStack() as cleanup, group.compute('cost',capacity=spec['capacity_mib'],quality=quality_file) as (client,process):
+        monitor=Monitor(group.root/'indexes',False)
+        cleanup.callback(lambda:resources.update(monitor.close()))
+        monitor.observe('storage',group.storage.process.pid);monitor.observe('compute',process.process.pid)
         client.open_database('bench');client.load_index('items');client.search_options=options
         caps=client.get_search_capabilities();hardware=caps['adaptive_hardware_fingerprint']
         client.execute('EXPLAIN '+sql_for(spec,pools['fit'][0]))
-        raw=directory/'cases.jsonl'
-        if raw.exists():raw.rename(directory/f'cases.incomplete-{time.time_ns()}.jsonl')
-        with raw.open('x') as sink:
+        with attempts.open('x') as sink:
             for repeat in range(repeats):
                 client.clear_data_cache();loss=0;reuse={}
                 for phase in ('cold','warm'):
-                    for i in indices:
+                    for i in rng.permutation(indices).tolist():
                         query=pools['fit'][i];digest=query_digest(query)
                         predicted_warm=reuse.get(digest)==loss
-                        record=timed_query(client,spec,query,group)
+                        identity=dict(phase=phase,repeat=repeat+1,query_id=i,query_digest=digest)
+                        sink.write(json.dumps(dict(event='started',**identity))+'\n');sink.flush()
+                        try:record=timed_query(client,spec,query,group,validate=False)
+                        except BaseException as error:
+                            failure=dict(**identity,error=type(error).__name__+': '+str(error))
+                            sink.write(json.dumps(dict(event='error',**failure))+'\n');sink.flush()
+                            write_json(directory/'failure.json',failure);raise
                         record.update(phase=phase,repeat=repeat+1,query_id=i,predicted_warm=predicted_warm)
                         cache=record['plan']['data_cache'];loss+=cache['evictions']
                         retained=sum(cache.get(k,0) for k in ('vectors_served_from_cache','admitted_rows','duplicate_inserts'))
                         if not cache['evictions'] and not cache['bypass_rows'] and retained>=record['plan']['counts']['vectors_used_for_rerank']:
                             reuse[digest]=loss
                         else:reuse.pop(digest,None)
-                        records.append(record);sink.write(json.dumps(record,allow_nan=False)+'\n');sink.flush()
+                        records.append(record);sink.write(json.dumps(dict(event='received',**record),allow_nan=False)+'\n');sink.flush()
+    # Match evaluation: oracle work follows the timed query sequences.
+    with raw.open('x') as sink:
+        for record in records:
+            try:
+                record.update(group.oracle.validate(spec,np.asarray(record['query'],dtype='<f4'),
+                    dict(rows=record['rows'],revision=record['revision'],execution_plan=record['plan']),group.descriptor))
+            except BaseException as error:
+                write_json(directory/'failure.json',dict(error=type(error).__name__+': '+str(error),query_id=record['query_id']))
+                raise
+            sink.write(json.dumps(record,allow_nan=False)+'\n')
     if profile:
         stats_records=[json.loads(line) for line in Path(profile['_calibration_file']).read_text().splitlines()]
     stats=round_statistics(stats_records)
@@ -220,7 +258,8 @@ def cost_samples(group,spec,pools,quality_file,profile,mode,path,fallback,direct
         statistics=stats,evidence=fit['evidence'])
     report=dict(accepted=fit['accepted'],model=model,fit=fit,options=options.to_dict(),elapsed_seconds=time.monotonic()-started,
         samples=len(records),distinct_queries=len(indices),scope='limited exact probes' if mode=='exact' and exact_fit_queries==5 else 'disjoint fit/validation queries',
-        raw_sha256=hashlib.sha256(raw.read_bytes()).hexdigest())
+        raw_sha256=hashlib.sha256(raw.read_bytes()).hexdigest(),attempts_sha256=hashlib.sha256(attempts.read_bytes()).hexdigest(),
+        sampling_order_seed=order_seed,resources=resources,timing_target='compute_elapsed_ms; oracle after timing')
     write_json(directory/'report.json',report);return report
 
 
@@ -243,17 +282,26 @@ def build_policy(calibration_dir, output_path):
         for path in sorted((root/'costs'/f'case-{case_id}').glob('*/report.json')):
             report=json.loads(path.read_text());raw=path.parent/'cases.jsonl'
             if hashlib.sha256(raw.read_bytes()).hexdigest()!=report['raw_sha256']:raise ValueError('Calibration raw evidence changed')
+            if 'attempts_sha256' in report and hashlib.sha256((path.parent/'attempts.jsonl').read_bytes()).hexdigest()!=report['attempts_sha256']:
+                raise ValueError('Calibration attempt evidence changed')
             # A rejected latency fit must not discard independent failure evidence.
             work['models'].append(dict(report['model'],cost_usable=report['accepted']))
-    document=dict(format_version=1,policy_id='p4_adaptive_frozen',workloads=list(workloads.values()))
+    document=dict(format_version=1,policy_id='p4_adaptive_frozen_v2',workloads=list(workloads.values()))
     AdaptivePolicy.from_document(document)
     write_json(output_path,document)
     return document
 
 
-def prepare(output_dir,tier='representative',case_ids=None,seed=20261103,resume=False,exact_fit_queries=5):
+def prepare(output_dir,tier='representative',case_ids=None,seed=20261103,resume=False,exact_fit_queries=5,
+            exclude_calibration_dirs=()):
     if exact_fit_queries not in (5,128):raise ValueError('Exact fit queries must be 5 or 128')
     output=Path(output_dir).resolve();configuration=config_manifest(tier,case_ids,seed,3,exact_fit_queries)
+    excluded=previous_query_digests(exclude_calibration_dirs)
+    configuration['previous_queries']=dict(count=len(excluded),sha256=digest_list(sorted(excluded)))
+    configuration['previous_query_bundles']=sorted(hashlib.sha256((Path(p)/'bundle.json').read_bytes()).hexdigest()
+                                                   for p in exclude_calibration_dirs)
+    for dimension in {spec['dimension'] for _,spec in selected_cases(tier,case_ids)}:
+        make_query_splits(dimension,seed,smoke=tier=='smoke',excluded_digests=excluded)
     if output.exists():
         if not resume:raise ValueError('Calibration output already exists')
         validate_resume(json.loads((output/'manifest.json').read_text()),configuration)
@@ -268,7 +316,7 @@ def prepare(output_dir,tier='representative',case_ids=None,seed=20261103,resume=
             print(json.dumps(dict(phase='prepare_dataset',group=name)),flush=True)
             group=Group(output/'groups'/name,cases[0][1],create=True,processes=processes)
             try:
-                pools=make_query_splits(cases[0][1]['dimension'],seed,smoke=tier=='smoke')
+                pools=make_query_splits(cases[0][1]['dimension'],seed,smoke=tier=='smoke',excluded_digests=excluded)
                 query_path=group.directory/'queries.npz'
                 if query_path.exists():
                     with np.load(query_path,allow_pickle=False) as existing:
@@ -632,6 +680,7 @@ def main():
     parser.add_argument('--repeats',type=int,default=3)
     parser.add_argument('--seed',type=int,default=20261103)
     parser.add_argument('--resume',action='store_true')
+    parser.add_argument('--exclude-calibration-dir',action='append',default=[])
     parser.add_argument('--exact-fit-queries',type=int,choices=(5,128),default=5)
     parser.add_argument('--full-exact',action='store_true')
     parser.add_argument('--samples',type=int)
@@ -640,7 +689,9 @@ def main():
     parser.add_argument('--patterns',nargs='+')
     parser.add_argument('--ablation',choices=('cache-input','transfer','candidate-correlation','observations'))
     args=parser.parse_args()
-    if args.command=='prepare':result=prepare(args.output_dir,args.tier,args.case_ids,args.seed,args.resume,args.exact_fit_queries)
+    if args.exclude_calibration_dir and args.command!='prepare':parser.error('--exclude-calibration-dir requires prepare')
+    if args.command=='prepare':result=prepare(args.output_dir,args.tier,args.case_ids,args.seed,args.resume,args.exact_fit_queries,
+                                            args.exclude_calibration_dir)
     elif args.command=='smoke':result=run_adaptive_matrix(args.output_dir,'smoke',repeats=args.repeats)
     elif args.command=='pilot':result=pilot(args.output_dir,args.case_ids or (0,5),args.seed)
     elif args.command=='ablate':

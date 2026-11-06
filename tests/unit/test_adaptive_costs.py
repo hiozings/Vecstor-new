@@ -25,6 +25,72 @@ def test_cost_fit_prunes_redundancy_and_rejects_unusable_models():
     with pytest.raises(ValueError,match='overlap'):helpers()['fit_cost_model'](records(1,96),records(1,32))
 
 
+def test_relative_error_fit_is_not_dominated_by_one_slow_training_sample():
+    training=[dict(query_digest=f'{i:064x}',features={'intercept':1.},ms=10.) for i in range(96)]
+    training[0]['ms']=10000.
+    validation=[dict(query_digest=f'{i:064x}',features={'intercept':1.},ms=10.) for i in range(96,128)]
+    fit=helpers()['fit_cost_model'](training,validation)
+    assert fit['accepted'] and abs(fit['coefficients']['intercept']-10.)<.1
+    assert fit['diagnostics']['training_samples']==96
+    # Neither predefined fit predicts this independently shifted validation set.
+    for row in validation:row['ms']=1000.
+    assert not helpers()['fit_cost_model'](training,validation)['accepted']
+
+
+def test_nearly_collinear_identifiable_cost_fit_converges():
+    def rows(start,count):
+        return [dict(query_digest=f'{i:064x}',features={'intercept':1.,'payload_bytes':1e6+(i%2)*16384},
+                     ms=10.+.001*(1e6+(i%2)*16384)) for i in range(start,start+count)]
+    fit=helpers()['fit_cost_model'](rows(0,96),rows(96,32))
+    assert fit['accepted'] and fit['diagnostics']['converged']
+    assert abs(fit['coefficients']['intercept']-10.)<.1
+    assert abs(fit['coefficients']['payload_bytes']-.001)<1e-6
+
+
+def test_copy_cost_is_not_discarded_for_negative_linear_dependence():
+    def rows(start,count):
+        return [dict(query_digest=f'{i:064x}',features={'intercept':1.,'payload_bytes':0. if i%2 else 10.,
+                     'cache_copy_bytes':20. if i%2 else 10.},ms=2. if i%2 else 1.) for i in range(start,start+count)]
+    fit=helpers()['fit_cost_model'](rows(0,96),rows(96,32))
+    assert fit['accepted']
+    assert fit['coefficients'].get('cache_copy_bytes',0)>0
+    assert fit['evidence']['p90_relative_error']<1e-6
+
+
+def test_internal_validation_selects_between_predefined_training_objectives():
+    training=[dict(query_digest=f'{i:064x}',features={'intercept':1.},ms=10. if i%2 else 20.) for i in range(96)]
+    validation=[dict(query_digest=f'{i:064x}',features={'intercept':1.},ms=15.) for i in range(96,128)]
+    fit=helpers()['fit_cost_model'](training,validation)
+    assert fit['accepted'] and abs(fit['coefficients']['intercept']-15.)<1e-6
+
+
+def test_nonnegative_solver_matches_exhaustive_small_face_search():
+    solve=helpers()['_nonnegative_least_squares']
+    rng=np.random.default_rng(20261106)
+    for _ in range(12):
+        a=rng.random((20,5));target=rng.random(20)
+        expected=float(target@target)
+        for mask in range(1,32):
+            columns=[i for i in range(5) if mask&(1<<i)]
+            weights=np.linalg.lstsq(a[:,columns],target,rcond=None)[0]
+            if np.all(weights>=0):
+                residual=a[:,columns]@weights-target
+                expected=min(expected,float(residual@residual))
+        weights,converged,_=solve(a,target)
+        residual=a@weights-target
+        assert converged and np.all(weights>=0)
+        assert abs(float(residual@residual)-expected)<1e-8
+
+
+def test_new_query_pool_rejects_any_overlap_with_previous_evidence():
+    h=helpers();old=h['make_query_splits'](4,20261104)
+    excluded={h['query_digest'](q) for pool in old.values() for q in pool}
+    with pytest.raises(ValueError,match='previous'):
+        h['make_query_splits'](4,20261104,excluded_digests=excluded)
+    fresh=h['make_query_splits'](4,20261106,excluded_digests=excluded)
+    assert not excluded.intersection(h['query_digest'](q) for pool in fresh.values() for q in pool)
+
+
 def test_dataset_query_splits_and_frozen_policy_hash():
     h=helpers();pools=h['make_query_splits'](4,20261103)
     assert [len(pools[k]) for k in ('calibration','quality','fit','evaluation')]==[500,500,128,500]

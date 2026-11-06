@@ -8,7 +8,7 @@ import numpy as np
 
 from vecstor.query.adaptive_policy import FEATURES
 
-# Prioritize identifiable transfer effects over collinear copy costs with opposite signs.
+# Stable preference order; only nonnegative-cone redundancy may remove a feature.
 FEATURE_PRIORITY=('intercept','payload_bytes','rpc_calls','candidate_rows','scan_rows','metadata_rows',
                   'ann_work','ann_candidates','selector_rows','rerank_values','cache_lookup_rows',
                   'cache_copy_bytes','cache_admit_bytes')
@@ -24,7 +24,7 @@ def digest_list(values):
     return hashlib.sha256(json.dumps(list(values),separators=(',',':')).encode()).hexdigest()
 
 
-def make_query_splits(dimension, seed, smoke=False):
+def make_query_splits(dimension, seed, smoke=False, excluded_digests=()):
     if type(dimension) is not int or dimension<1 or type(seed) is not int or seed<0:
         raise ValueError('Invalid query split parameters')
     rng=np.random.default_rng(seed)
@@ -33,6 +33,7 @@ def make_query_splits(dimension, seed, smoke=False):
     pools={name:rng.random((n,dimension),dtype=np.float32) for name,n in sizes.items()}
     hashes=[query_digest(q) for values in pools.values() for q in values]
     if len(hashes)!=len(set(hashes)):raise ValueError('Query splits overlap')
+    if set(hashes).intersection(excluded_digests):raise ValueError('Queries overlap previous evidence')
     return pools
 
 
@@ -74,6 +75,30 @@ def _matrix(records):
     return np.asarray(x,dtype=np.float64),np.asarray(y,dtype=np.float64),queries
 
 
+def _nonnegative_least_squares(a,target):
+    """Bounded active-set solve; direct subproblems avoid slow gradient convergence."""
+    size=a.shape[1];weights=np.zeros(size);active=np.zeros(size,dtype=bool)
+    tolerance=10*np.finfo(float).eps*max(a.shape)*max(float(np.linalg.norm(a.T@target,np.inf)),1e-12)
+    limit=max(100,20*size*size);iterations=0
+    while iterations<limit:
+        gradient=a.T@(target-a@weights)
+        candidates=np.where(~active,gradient,-np.inf)
+        if not np.any(candidates>tolerance):return weights,True,iterations
+        active[int(np.argmax(candidates))]=True
+        while iterations<limit:
+            iterations+=1;trial=np.zeros(size)
+            trial[active]=np.linalg.lstsq(a[:,active],target,rcond=None)[0]
+            if np.all(trial[active]>0):
+                weights=trial;break
+            bad=active&(trial<=0);denominator=weights[bad]-trial[bad]
+            ratios=np.divide(weights[bad],denominator,out=np.zeros_like(denominator),where=denominator>0)
+            alpha=float(np.min(ratios))
+            weights+=alpha*(trial-weights)
+            drop=active&(weights<=np.finfo(float).eps*max(1.,float(np.max(weights))))
+            active[drop]=False;weights[drop]=0.
+    return weights,False,iterations
+
+
 def fit_cost_model(training, validation):
     x,y,train_queries=_matrix(training);v,truth,val_queries=_matrix(validation)
     if set(train_queries)&set(val_queries):raise ValueError('Cost query splits overlap')
@@ -81,18 +106,30 @@ def fit_cost_model(training, validation):
     normalized=x/scale
     kept=[];dropped=[]
     for column,name in enumerate(FEATURE_PRIORITY):
-        trial=kept+[column]
-        if np.linalg.matrix_rank(normalized[:,trial],tol=1e-8)>len(kept):kept.append(column)
-        else:dropped.append(name)
-    if not kept or len(y)<len(kept):raise ValueError('Unidentifiable cost model')
-    a=normalized[:,kept]
-    step=1./max(float(np.linalg.norm(a,ord=2)**2),1e-12)
-    weights=np.zeros(len(kept));converged=False
-    for iteration in range(20000):
-        updated=np.maximum(0.,weights-step*(a.T@(a@weights-y)))
-        if np.max(np.abs(updated-weights))<=1e-9*max(1.,float(np.max(np.abs(weights)))):
-            weights=updated;converged=True;break
-        weights=updated
+        target_column=normalized[:,column]
+        redundant=np.linalg.norm(target_column)<=1e-8
+        if kept and not redundant:
+            combination,converged,_=_nonnegative_least_squares(normalized[:,kept],target_column)
+            redundant=converged and np.linalg.norm(normalized[:,kept]@combination-target_column)<=1e-8
+        # Signed dependence is not redundancy under nonnegative coefficients.
+        if redundant:dropped.append(name)
+        else:kept.append(column)
+    rank=int(np.linalg.matrix_rank(normalized[:,kept],tol=1e-8)) if kept else 0
+    if not kept or len(y)<rank:raise ValueError('Unidentifiable cost model')
+    # Both objectives train on the same fit queries. Internal validation selects
+    # between these two predefined candidates; the final holdout is never read.
+    candidates=[]
+    for name,weight in (('absolute',np.ones_like(y)),('relative',1./np.maximum(y,1.))):
+        a=normalized[:,kept]*weight[:,None]
+        weights,converged,iterations=_nonnegative_least_squares(a,y*weight)
+        prediction=v[:,kept]@(weights/scale[kept])
+        relative=np.abs(prediction-truth)/np.maximum(truth,1.)
+        median=float(np.median(relative));p90=float(np.percentile(relative,90))
+        score=max(median/.2,p90/.4) if converged else float('inf')
+        candidates.append(dict(name=name,weights=weights,converged=converged,iterations=iterations,
+                               median=median,p90=p90,score=score))
+    chosen=min(candidates,key=lambda c:(c['score'],c['median'],c['name']))
+    weights=chosen['weights'];converged=chosen['converged'];iterations=chosen['iterations']
     values=weights/scale[kept]
     predicted=v[:,kept]@values
     errors=np.abs(predicted-truth);relative=errors/np.maximum(truth,1.)
@@ -103,8 +140,12 @@ def fit_cost_model(training, validation):
             validation_queries=len(set(val_queries)),median_relative_error=median,p90_relative_error=p90,
             fit_queries_sha256=digest_list(sorted(set(train_queries))),
             validation_queries_sha256=digest_list(sorted(set(val_queries)))),
-        diagnostics=dict(method='scaled projected-gradient nonnegative least squares',converged=converged,
-            iterations=iteration+1,rank=len(kept),retained=[FEATURE_PRIORITY[i] for i in kept],dropped=dropped,
+        diagnostics=dict(method='scaled active-set nonnegative least squares',converged=converged,
+            weighting=chosen['name'],all_training_observations_retained=True,
+            model_selection='two predefined objectives; internal validation only',
+            alternatives=[{k:c[k] for k in ('name','converged','iterations','median','p90')} for c in candidates],
+            iterations=iterations,rank=rank,individual_coefficients_identifiable=rank==len(kept),
+            retained=[FEATURE_PRIORITY[i] for i in kept],dropped=dropped,
             training_samples=len(training),validation_samples=len(validation),
             validation_ms=truth.tolist(),prediction_ms=predicted.tolist()))
 

@@ -69,6 +69,17 @@ ANN成本拟合使用128个不同向量（96拟合、32验证），组件质量�
 
 `smoke`只证明工具链，短样本不得生成ANN质量profile；其auto只能走合法exact退化，报告明确标为`smoke_exact_only`。
 
+性能修复后的新校准应指定新种子，并排除所有旧查询池，例如：
+
+```bash
+python benchmarks/p4/adaptive.py prepare --output-dir results/adaptive-calibration-v2 \
+  --seed 20261106 --exclude-calibration-dir results/adaptive-calibration-v1
+```
+
+`--exclude-calibration-dir`可重复指定；旧bundle和查询文件先校验哈希，再在创建新输出前检查全部新查询与旧池无重叠。排重摘要和旧bundle摘要写入manifest。新策略ID为`p4_adaptive_frozen_v2`。
+
+成本校准采用与评估相同的资源采样，并在计时序列结束后验证答案；拟合/验证查询交错执行，防止查询位置与缓存预热程度系统性绑定。成本目标仍为`compute_elapsed_ms`，客户端总耗时另行保留。非负拟合使用有界active-set求解，保留负线性相关但不可非负表示的特征；参数不可独立辨识时明确标记，不把有效系数解释为真实带宽或因果分解。两个预定义损失目标仅用拟合集训练，内部验证选优并保持原误差门槛，最终独立留出只用于验收。
+
 计时尝试在RPC前写入`attempts.jsonl`，失败和中断证据保留；失败或中断的trial不能通过`--resume`重跑成成功，修复后须使用新输出目录。已完整完成且哈希一致的trial可以复用。逐查询延迟不含日志写入，吞吐包含持久日志开销，二者口径不同。
 
 性能发布判定要求每个冷热状态至少三次重复、每次200条、模型覆盖率至少95%；两固定路径实测差距达到20%时，还要求选择较便宜路径的比例至少90%。同时检查P50/P95 regret与规划/反馈开销。20条扩展探测仅作诊断，不能通过正式性能门槛；correctness层的短样本性能标为`NOT_RUN`。字节模型与延迟模型都只用拟合集训练，验证集不参与预处理拟合。
