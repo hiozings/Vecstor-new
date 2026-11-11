@@ -27,16 +27,16 @@ class FrozenMap(Mapping):
 
 
 def freeze(value):
-    if value is None or type(value) in (str, int, float, bool):return value
-    if isinstance(value,FrozenMap):return value
-    if isinstance(value, Mapping):
-        return FrozenMap(value)
-    if isinstance(value, (list, tuple)):
-        return tuple(freeze(item) for item in value)
-    if value is None or type(value) in (str, int, float, bool):
+    kind=type(value)
+    if value is None or kind in (str,int,float,bool):return value
+    if kind is dict:return FrozenMap(value)
+    if kind in (list,tuple):return tuple(freeze(item) for item in value)
+    if isinstance(value,(FrozenMap,DataScope,SearchOptions,FrozenValues,DeploymentContext)):
         return value
-    if isinstance(value, (DataScope, SearchOptions, FrozenValues, DeploymentContext)):
-        return value
+    # Preserve support for mapping/sequence subclasses without paying ABC
+    # dispatch costs for the owned dict/tuple values used by every query.
+    if isinstance(value,Mapping):return FrozenMap(value)
+    if isinstance(value,(list,tuple)):return tuple(freeze(item) for item in value)
     raise TypeError('Unsupported mutable planning value')
 
 
@@ -44,6 +44,7 @@ def plain(value):
     if value is None or type(value) in (str, int, float, bool):return value
     if isinstance(value,FrozenMap) or type(value) is dict:
         return {key:plain(item) for key,item in value.items()}
+    if type(value) in (list,tuple):return [plain(item) for item in value]
     if isinstance(value,(FrozenValues,DeploymentContext,DataScope,SearchOptions)):
         return {key:plain(item) for key,item in vars(value).items()}
     if is_dataclass(value):

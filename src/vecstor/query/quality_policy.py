@@ -1,5 +1,7 @@
 """Snapshot-bound empirical quality profiles; never an online Recall guarantee."""
 from dataclasses import dataclass, replace
+from collections import OrderedDict
+from threading import RLock
 import math
 from types import MappingProxyType
 
@@ -110,6 +112,8 @@ class QualityCatalog:
     def __init__(self,profiles=()):
         from vecstor.compute.planner_types import freeze
         self._profiles=MappingProxyType({p.profile_id:p for p in profiles})
+        self._planning_candidates=OrderedDict()
+        self._planning_lock=RLock()
         self._planning_descriptions=MappingProxyType({name:freeze(dict(p.describe(),state='applied',requested_id=name))
                                                       for name,p in self._profiles.items()})
 
@@ -123,6 +127,32 @@ class QualityCatalog:
         profiles=[QualityProfile.parse(p) for p in raw]
         if len({p.profile_id for p in profiles})!=len(profiles):raise ValueError('Duplicate quality profile IDs')
         return cls(profiles)
+
+    def planning_cache_stats(self):
+        with self._planning_lock:
+            return dict(entries=len(self._planning_candidates),max_entries=32,
+                        accounted_bytes=len(self._planning_candidates)*32768)
+
+    def get_planning_candidates(self,key,query_vector,*,read_only=False):
+        with self._planning_lock:
+            value=self._planning_candidates.get(key)
+            if value is None:return None
+            # Static eligibility is bound by the key; the query domain is never cached.
+            for candidate in value[0]:
+                if candidate.mode=='exact':continue
+                profile=self._profiles[candidate.options.quality_profile_id]
+                if not len(query_vector) or any(not profile.query_min<=x<=profile.query_max for x in query_vector):
+                    return None
+            if not read_only:self._planning_candidates.move_to_end(key)
+            return value
+
+    def put_planning_candidates(self,key,candidates,diagnostics):
+        from vecstor.compute.planner_types import freeze
+        value=(candidates,freeze(diagnostics))
+        with self._planning_lock:
+            self._planning_candidates[key]=value
+            self._planning_candidates.move_to_end(key)
+            while len(self._planning_candidates)>32:self._planning_candidates.popitem(last=False)
 
     def describe_profile(self, profile_id):
         """Describe one profile without scanning the catalog or granting eligibility."""

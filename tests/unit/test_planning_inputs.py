@@ -76,6 +76,59 @@ def test_each_path_resolves_its_own_profile(qualification):
     assert candidates[1].quality_description['requested_id']=='sf'
 
 
+def test_reuses_configuration_but_rechecks_query_domain(qualification,monkeypatch):
+    q=qualification;calls=[];original=q.catalog.resolve
+    def resolve(*args,**kwargs):
+        calls.append(args[0]);return original(*args,**kwargs)
+    monkeypatch.setattr(q.catalog,'resolve',resolve)
+    first=qualify(q);assert len(calls)==2
+    assert qualify(q)==first
+    assert len(calls)==2
+    q.plan=replace(q.plan,query_vector=(float('nan'),.5))
+    assert [c.mode for c in qualify(q)]==['exact']
+    assert len(calls)==4
+
+
+def test_candidate_configuration_cache_is_bounded_and_version_scoped(qualification):
+    q=qualification
+    for i in range(40):
+        q.lease.storage_epoch=f'epoch-{i}'
+        qualify(q)
+    assert q.catalog.planning_cache_stats()==dict(entries=32,max_entries=32,accounted_bytes=32*32768)
+    q.entry=deepcopy(q.entry)
+    q.entry.descriptor=replace(q.entry.descriptor,payload_sha256='0'*64)
+    assert [c.mode for c in qualify(q)]==['exact']
+
+
+def test_candidate_cache_does_not_mutate_on_explain_or_hide_budget_changes(qualification):
+    q=qualification;options=SearchOptions(mode='approx',path='auto')
+    qualify_candidates(q.plan,options,q.lease,q.entry,q.catalog,q.match,read_only=True)
+    assert q.catalog.planning_cache_stats()['entries']==0
+    qualify(q)
+    with pytest.raises(ValueError):qualify(q,nprobe=True)
+    with pytest.raises(ValueError,match='budget'):qualify(q,candidates=1)
+
+
+def test_candidate_cache_distinguishes_default_and_effective_read_options(qualification):
+    q=qualification;options=SearchOptions(mode='approx',path='auto')
+    raw=qualify_candidates(q.plan,options,q.lease,q.entry,q.catalog,q.match)
+    effective=qualify_candidates(q.plan,options,q.lease,q.entry,q.catalog,q.match,read_settings={})
+    assert raw[0].execution_fingerprint!=effective[0].execution_fingerprint
+    integer=qualify_candidates(q.plan,options,q.lease,q.entry,q.catalog,q.match,read_settings={'cache_max_bytes':1})
+    floating=qualify_candidates(q.plan,options,q.lease,q.entry,q.catalog,q.match,read_settings={'cache_max_bytes':1.0})
+    assert integer[0].execution_fingerprint!=floating[0].execution_fingerprint
+
+
+def test_candidate_cache_bypasses_oversized_keys(qualification):
+    from vecstor.compute.planning_inputs import _candidate_configuration_key
+    q=qualification;options=SearchOptions(mode='approx',path='auto')
+    assert _candidate_configuration_key(q.plan,options,q.lease,q.entry,q.match,{}) is not None
+    nested=('x',)
+    for _ in range(7):nested=(nested,)
+    for read in ({'fields':nested},{'size':2**128},{'text':'x'*5000}):
+        assert _candidate_configuration_key(q.plan,options,q.lease,q.entry,q.match,read) is None
+
+
 def test_error_fallback_and_fused_prune_exact(qualification):
     assert all(c.mode=='approx' for c in qualify(qualification,fallback='error'))
     assert [c.path for c in qualify(qualification,candidate_data_path='fused')]==['search-first']

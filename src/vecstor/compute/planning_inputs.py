@@ -58,12 +58,59 @@ def execution_signature(options, read_settings=None):
     except TypeError:return _execution_signature(options,read_settings)
 
 
+def _candidate_configuration_key(plan,options,lease,entry,match,read_settings,*,validate=True):
+    # At most 32 entries charged 32 KiB each. Large/custom configurations bypass
+    # reuse; no live lease/index objects or query vectors are retained.
+    if entry is None or entry.descriptor is None or len(plan.metadata_sql)>4096:return None
+    read=None if read_settings is None else tuple(sorted(read_settings.items()))
+    if (read is not None and len(read)>16) or len(match.profiles or {})>2:return None
+    identity=tuple(getattr(entry.descriptor,k) for k in ('artifact_id','payload_sha256','snapshot_sha256'))
+    scope=tuple(getattr(lease,k,None) for k in ('storage_epoch','database_id','table_id','revision','schema_version','dimension'))
+    mappings=tuple(sorted((match.profiles or {}).items()))
+    read_types=None if read is None else tuple(type(v) for _,v in read)
+    key=(scope,entry.key,identity,entry.handle.nlist,entry.handle.row_count,
+         plan.metadata_sql,plan.limit,options,read,read_types,mappings)
+    # A hit retains nothing new. Check the complete size/type budget only on a
+    # miss, before admission; strict options validation still precedes lookup.
+    if not validate:return key
+    charge=0;items=0
+    def small(value,depth=0):
+        nonlocal charge,items
+        items+=1
+        if items>128 or depth>5:return False
+        kind=type(value)
+        if value is None or kind is bool:charge+=32
+        elif kind is int:
+            if abs(value)>=2**64:return False
+            charge+=32
+        elif kind is str:
+            if len(value)>4096:return False
+            charge+=64+4*len(value)
+        elif kind is tuple and len(value)<=16:
+            charge+=64+8*len(value)
+            if not all(small(v,depth+1) for v in value):return False
+        else:return False
+        return charge<=24576
+    if not all(small(v) for v in (read,identity,scope,mappings,plan.metadata_sql,
+                                 tuple(vars(entry.key).values()),tuple(vars(options).values()))):return None
+    return key
+
+
 def qualify_candidates(plan, options, lease, pinned_cpu_entry, quality_catalog, policy_match,
-                       *, diagnostics=None, read_settings=None):
+                       *, diagnostics=None, read_settings=None, read_only=False):
     diagnostics={} if diagnostics is None else diagnostics
     if options.device!='cpu':raise ValueError('Adaptive planning supports CPU only')
     if options.mode=='approx' and lease.published_index_state=='corrupt':
         raise ArtifactError('DATA_LOSS','published_artifact_corrupt')
+    options.validate()
+    cache_key=(_candidate_configuration_key(plan,options,lease,pinned_cpu_entry,policy_match,read_settings,validate=False)
+               if options.mode=='approx' and quality_catalog is not None else None)
+    if cache_key is not None:
+        try:cached=quality_catalog.get_planning_candidates(cache_key,plan.query_vector,read_only=read_only)
+        except (TypeError,RecursionError):cached=None
+        if cached is not None:
+            diagnostics.update(cached[1]);return cached[0]
+        cache_key=_candidate_configuration_key(plan,options,lease,pinned_cpu_entry,policy_match,read_settings)
     candidates=[];conflicts=[]
     def candidate(identity, effective, description):
         return PlanCandidate(identity,effective.mode,effective.path,effective,description,
@@ -104,7 +151,11 @@ def qualify_candidates(plan, options, lease, pinned_cpu_entry, quality_catalog, 
     if not candidates:
         reason=diagnostics.get('index') or diagnostics.get('quality') or 'adaptive_no_eligible_quality_path'
         raise RemoteError(grpc.StatusCode.FAILED_PRECONDITION,reason)
-    return tuple(candidates)
+    result=tuple(candidates)
+    if (cache_key is not None and not read_only and any(c.mode=='approx' for c in result)
+            and 'quality_profile_scope_mismatch' not in diagnostics.values()):
+        quality_catalog.put_planning_candidates(cache_key,result,diagnostics)
+    return result
 
 
 def collect_planning_inputs(plan, lease, entry, candidates, policy_match, policy, cache_snapshot,

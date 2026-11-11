@@ -2,7 +2,7 @@
 
 本文件适用于整个项目，供团队成员与开发代理共同遵循。记录项目实施计划、目录结构、技术栈和开发约束；后续开发应同步维护，避免文档与实际实现脱节。
 
-最后更新：2026-11-10。
+最后更新：2026-11-11。
 
 ## 1. 项目背景与当前状态
 
@@ -11,7 +11,7 @@
 - 依据：`README.md` 与 `项目申报书2.pdf`。
 - 申报实施周期：2026-01-01 至 2026-12-31。
 - 预期成果：一套可运行的混合查询存算分离向量数据引擎原型，以及包含架构设计、优化方案和性能测试的结题报告。
-- 已建立 Conda `vecstor` 环境；P1 本地基线、P2 gRPC 服务和 P2.5 交互式 SQL、运行时选库、持久 CRUD 已实现。P2.5 通过真实终端、P1 对照、重启及 Landlock 验收；P3 CPU ANN、双路径、候选扩展和计划展示已实现，通过 427 项回归、1 万行真实终端/Landlock 及 360 次规模实验。GPU ANN search-first 已接入，P4权威索引持久发布、双节点加载/重启恢复及有界数据缓存/按需传输子阶段已完成，自适应策略与增量维护仍待实现。
+- 已建立 Conda `vecstor` 环境；P1 本地基线、P2 gRPC 服务和 P2.5 交互式 SQL、运行时选库、持久 CRUD 已实现。P2.5 通过真实终端、P1 对照、重启及 Landlock 验收；P3 CPU ANN、双路径、候选扩展和计划展示已实现，通过 427 项回归、1 万行真实终端/Landlock 及 360 次规模实验。GPU ANN search-first 已接入，P4权威索引持久发布、双节点加载/重启恢复及有界数据缓存/按需传输子阶段已完成，自适应策略已接入但性能尚未通过，增量维护仍待实现。
 - 以下排期按 2026-10-10 起剩余约 12 周制定。若存在其他位置的代码或学校提前验收，应先核实再更新排期。
 
 ## 2. 目标与范围
@@ -127,6 +127,8 @@ P4自适应查询策略下一子阶段已形成[详细设计](docs/design/p4-ada
 
 2026-11-10自适应性能修复状态：旧云端135配置/43470计时查询的质量通过，18个性能单元均失败。风险/成本分离、偏差反馈与并发键、拟合求解和规划配置缓存修复已分阶段提交；冻结实现`1a8cff9`本机无PYTHONPATH完整回归970通过（零失败/错误/跳过）。规划开销仍未达标，新增预测模板缓存因无稳定收益撤回。云端新独立留出任务`adaptive-v2-frozen-20261110`运行中，未完成最终性能验收；旧失败证据保留，详见[验收记录](docs/validation/p4-adaptive.md)。
 
+2026-11-11后续修复：向量批读改为单个BIGINT[]绑定，消除逐ID的缺失pandas探测；云端旧版4并发60秒超时，新版4/8并发正确完成。增加至多32条不可变候选配置复用，仍逐请求检查向量范围、动态成本及版本；独立审查无阻断项，锁定临时Conda环境无PYTHONPATH真实GPU完整回归976通过。规划开发配对P95下降约19%—22%至约1.05ms，仍未过0.5ms；case0新内部模型两路径通过误差门槛，正式剩余验收待完成。旧结果和失败证据保留，见[后续计划](docs/superpowers/plans/2026-11-11-p4-adaptive-followup.md)。
+
 关键检查点：10 月底必须打通完整查询链路；若未达到，暂停扩展功能。11 月底冻结主要功能，后续优先实验与结题。若学校提前验收，前移相应阶段。
 
 ### 团队协作
@@ -176,7 +178,7 @@ P4自适应查询策略下一子阶段已形成[详细设计](docs/design/p4-ada
 │   ├── cli.py            # 命令行参数和产物输出
 │   ├── isolation.py      # 计算进程 Landlock 权限与拒绝读取探针
 │   ├── storage/          # service.py兼容P2；catalog/database/sql_service管理库/事务/租约，index_catalog/index_artifacts/index_service管理索引目录、工件与发布RPC
-│   ├── compute/          # P2 RemoteEngine、v2路由/执行、lease_io/index_manager与index_publication/index_recovery显式发布加载及预热；planner_types提供待接入的自适应契约
+│   ├── compute/          # P2 RemoteEngine、v2路由/执行、lease_io/index_manager与index_publication/index_recovery显式发布加载及预热；planner_types提供已接入的自适应契约
 │   ├── index/            # CPU工件格式/摘要校验、GPU worker/副本、CPU IVF、快照键、有界registry与构建进程
 │   ├── rpc/              # v1/v2 协议、能力缓存会话客户端、timing接入计时、类型化结果、生命周期和验收
 │   ├── shell/            # app/buffer/commands/index_commands/cache_commands/render/completion：SQL终端与索引/缓存控制
@@ -215,7 +217,7 @@ P4自适应查询策略下一子阶段已形成[详细设计](docs/design/p4-ada
 │   ├── design/interactive-sql-shell.md # P2.5 终端与可写数据库设计
 │   ├── design/p3-faiss-execution.md # P3 索引、两路径与计划展示设计
 │   ├── design/p4-data-cache-and-transfer.md # 有界向量缓存/字段传输设计与验收边界
-│   ├── design/p4-adaptive-query-strategy.md # CPU自适应路径、统计/成本/质量约束设计（待实施）
+│   ├── design/p4-adaptive-query-strategy.md # CPU自适应路径、统计/成本/质量约束设计（验收中）
 │   ├── design/p4-index-publication.md # P4索引工件/发布/双节点/恢复设计与实施边界（索引子阶段完成）
 │   ├── design/gpu-improvement-analysis.md # GPU不足、补充探测与改进优先级
 │   ├── design/gpu-ann-execution.md # GPU ANN 与 SQL 设备选择设计
@@ -235,7 +237,7 @@ P4自适应查询策略下一子阶段已形成[详细设计](docs/design/p4-ada
 │   ├── superpowers/plans/2026-10-12-interactive-sql-shell.md # P2.5 执行计划与完成记录
 │   ├── superpowers/plans/2026-10-13-p3-faiss.md # P3 六任务实施计划
 │   ├── superpowers/plans/2026-10-15-gpu-improvements.md # GPU G0—G2实施记录与G3—G5待办
-│   ├── superpowers/plans/2026-10-23-p4-adaptive-query-strategy.md # 自适应策略八任务计划（待实施）
+│   ├── superpowers/plans/2026-10-23-p4-adaptive-query-strategy.md # 自适应策略八任务计划（验收中）
 │   ├── superpowers/plans/2026-10-19-p4-data-cache-and-transfer.md # 缓存与传输八任务实施记录（代表性范围完成）
 │   ├── superpowers/plans/2026-10-16-p4-index-publication.md # P4索引子阶段九任务计划与验收矩阵（已完成）
 │   ├── superpowers/plans/2026-10-15-gpu-ann.md # GPU 六阶段实施记录

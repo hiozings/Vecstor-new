@@ -27,7 +27,7 @@ def prepare_adaptive(plan, options, lease, entry, catalog, policy, observations,
     match=policy.lookup(scope,artifact_identity(entry),plan.metadata_sql,plan.limit,context) if policy else PolicyMatch(profiles={})
     diagnostics={}
     candidates=qualify_candidates(plan,options,lease,entry,catalog,match,
-                                   diagnostics=diagnostics,read_settings=read_settings)
+                                   diagnostics=diagnostics,read_settings=read_settings,read_only=explain)
     snapshot=cache.scope_snapshot(scope) if cache else {}
     inputs=collect_planning_inputs(plan,lease,entry,candidates,match,policy,snapshot,observations,context,
                                   remaining_ms,explain=explain,read_settings=read_settings,diagnostics=diagnostics)
