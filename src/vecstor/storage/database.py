@@ -285,7 +285,11 @@ class Database:
             raise ValueError("Vector IDs must be distinct nonnegative integers")
         if not ids:
             return np.empty((0, lease["dimension"]), dtype=np.float32)
-        rows = connection.execute(f"SELECT id, vector FROM {identifier(lease['table'])} WHERE id IN ({','.join('?' for _ in ids)})", ids).fetchall()
+        # One typed parameter avoids DuckDB probing optional modules for every ID.
+        # Keep data bound, preserve int64 exactly, and restore caller order below.
+        rows = connection.execute(
+            f"SELECT id, vector FROM {identifier(lease['table'])} WHERE id IN (SELECT unnest(CAST(? AS BIGINT[])))",
+            [json.dumps(ids,separators=(',', ':'))]).fetchall()
         mapping = dict(rows)
         if set(mapping) != set(ids):
             raise ValueError("Vector ID not present in snapshot")

@@ -37,3 +37,23 @@ def test_import_json_metadata_preserves_escaping_and_int64(tmp_path):
         catalog.database(identity).call('import','source','items',lambda:('digest',data),'import')
         rows=catalog.execute(identity,'SELECT id,category,timestamp,value FROM items ORDER BY id','read')['rows']
         assert rows==[[int(ids[i]),categories[i],int(-ids[i]),float(values[i])] for i in range(5)]
+
+
+def test_vector_fetch_does_not_probe_optional_modules_per_id(tmp_path):
+    import numpy as np
+    class Probe(importlib.abc.MetaPathFinder):
+        calls=0
+        def find_spec(self,fullname,path=None,target=None):
+            if fullname=='pandas':
+                self.calls+=1
+                raise ModuleNotFoundError("No module named 'pandas'",name='pandas')
+    with DatabaseCatalog(tmp_path) as catalog:
+        identity=catalog.open_database('demo',True)['id']
+        data=generate_dataset(1024,4,seed=19)
+        catalog.database(identity).call('import','source','items',lambda:('digest',data),'import')
+        lease=catalog.begin_read(identity,'items')
+        probe=Probe();sys.meta_path.insert(0,probe)
+        try:result=catalog.vectors(identity,lease['token'],data.ids[::-1].tolist())
+        finally:sys.meta_path.remove(probe)
+        np.testing.assert_array_equal(result,data.vectors[::-1])
+        assert probe.calls<=16
